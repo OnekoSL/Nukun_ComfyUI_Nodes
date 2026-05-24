@@ -38,6 +38,8 @@ Most nodes work with a standard ComfyUI installation. These wrapper nodes need a
 - `NukunConditioningAverageKeepMagnitude` - display name `Conditioning Average Keep Magnitude (Nukun)`, category `Nukun/Conditioning`
 - `NukunConditioningNormalizeMagnitudeToEmpty` - display name `Conditioning Normalize Magnitude To Empty (Nukun)`, category `Nukun/Conditioning`
 - `NukunConditioningSDXLMergeClipGL` - display name `Conditioning SDXL Merge CLIP G/L (Nukun)`, category `Nukun/Conditioning`
+- `NukunConditioningAnalyzer` - display name `Conditioning Analyzer (Nukun)`, category `Nukun/Conditioning`
+- `NukunConditioningAdjust` - display name `Conditioning Adjust (Nukun)`, category `Nukun/Conditioning`
 - `NukunRegionalPromptEncoder` - display name `Regional Prompt Encoder (Nukun)`, category `Nukun/Conditioning`
 - `NukunRegionalSculptPromptEncoder` - display name `Regional Sculpt Prompt Encoder (Nukun)`, category `Nukun/Conditioning`
 - `NukunSplitMasks` - display name `Split Masks (Nukun)`, category `Nukun/Mask`
@@ -105,6 +107,26 @@ This SD1/SDXL CLIP node is the Nukun-native replacement for the old external `CL
 It tokenizes text, skips special and precomputed embedding tokens, sculpts eligible CLIP token vectors with cached `top_k` nearest-vector search, then encodes with ComfyUI's scheduled CLIP path.
 The old `Vector_Sculptor_ComfyUI` package is not patched, so older workflows can still load while new workflows can use `CLIP Sculpt Text Encode (Nukun)`.
 The companion conditioning nodes provide Nukun versions of slerp, average-keep-magnitude, normalize-to-empty, and SDXL CLIP G/L merge.
+
+## Conditioning Analyzer and Adjust
+
+`Conditioning Analyzer (Nukun)` passes conditioning through unchanged and returns a text report with entry count, tensor shapes, dtype/device, metadata keys, pooled-output presence, token count, channel count, token-norm stats, and NaN/Inf checks.
+Use it before and after experimental nodes such as Capitan Advanced Enhancer to see what changed numerically.
+
+`Conditioning Adjust (Nukun)` is a deterministic, preset-based conditioner for gentle Pony v7/T5 and SDXL/Pony v6 experiments.
+It does not use random MLPs, attention layers, or external Capitan code.
+Presets are `neutral_report_only`, `literal_detail`, `soft_balance`, `contrast_pop`, and `negative_tamer`.
+`model_profile` can be left on `auto`, or set explicitly to `t5`, `sdxl_clip`, or `sd15_clip`.
+Auto mode uses conservative profile scaling for older CLIP conditionings, so SDXL/Pony v6 gets a milder detail push than T5.
+Keep `preserve_magnitude` enabled for safer comparisons on the same seed.
+
+Recommended starting points:
+
+- Pony v7/T5 positive: `literal_detail` or `soft_balance`, `model_profile = auto`, `strength = 0.5..1.0`.
+- Pony v7/T5 negative: `negative_tamer`, `model_profile = auto`, `strength = 0.5..1.0`.
+- SDXL/Pony v6 positive: `soft_balance`, `model_profile = auto` or `sdxl_clip`, `strength = 0.4..0.8`.
+- SD1.5 positive: `soft_balance`, `model_profile = auto` or `sd15_clip`, `strength = 0.3..0.7`.
+- Diagnostics only: `neutral_report_only` or `Conditioning Analyzer (Nukun)`.
 
 ## Regional Prompt Encoder
 
