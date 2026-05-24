@@ -1,0 +1,133 @@
+SUPPORTED_T5_KEYS = ("pile_t5xl", "t5xxl", "umt5xxl", "mt5xl", "t5base")
+
+
+class NukunT5EqualLengthBalancer:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "tokenizer": ("CLIP", {"tooltip": "The loaded T5 tokenizer to use."}),
+                "target": (
+                    "INT",
+                    {
+                        "default": 1024,
+                        "min": 0,
+                        "max": 4096,
+                        "step": 1,
+                        "tooltip": "Minimum shared token length for positive and negative prompts.",
+                    },
+                ),
+                "positive": ("STRING", {"multiline": True, "dynamicPrompts": True}),
+                "negative": ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            },
+        }
+
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "INT", "INT", "INT", "STRING")
+    RETURN_NAMES = (
+        "positive",
+        "negative",
+        "positive_raw_tokens",
+        "negative_raw_tokens",
+        "effective_target",
+        "report",
+    )
+    FUNCTION = "balance"
+    CATEGORY = "Nukun/Conditioning"
+    DESCRIPTION = (
+        "Encodes positive and negative prompts with a supported T5 tokenizer, "
+        "padding both to the same effective token length and returning token diagnostics."
+    )
+
+    def _set_t5_options(self, clip, min_length=None, min_padding=None):
+        for key in SUPPORTED_T5_KEYS:
+            if min_length is not None:
+                clip.set_tokenizer_option(f"{key}_min_length", min_length)
+            if min_padding is not None:
+                clip.set_tokenizer_option(f"{key}_min_padding", min_padding)
+
+    def _detect_t5_key(self, *token_sets):
+        available = set()
+        for tokens in token_sets:
+            if isinstance(tokens, dict):
+                available.update(tokens.keys())
+
+        for key in SUPPORTED_T5_KEYS:
+            if key in available:
+                return key
+        return None
+
+    def _token_count(self, tokens, key):
+        try:
+            batches = tokens[key]
+            if len(batches) == 0:
+                return 0
+            return len(batches[0])
+        except (KeyError, TypeError):
+            raise RuntimeError(f"ERROR: Token stream '{key}' was not found in tokenizer output.")
+
+    def _available_token_keys(self, *token_sets):
+        available = set()
+        for tokens in token_sets:
+            if isinstance(tokens, dict):
+                available.update(tokens.keys())
+        if not available:
+            return "none"
+        return ", ".join(sorted(available))
+
+    def balance(self, tokenizer, target, positive, negative):
+        if tokenizer is None:
+            raise RuntimeError("ERROR: A valid tokenizer is required.")
+
+        measure = tokenizer.clone()
+        self._set_t5_options(measure, min_length=0, min_padding=0)
+        raw_positive_tokens = measure.tokenize(positive)
+        raw_negative_tokens = measure.tokenize(negative)
+
+        t5_key = self._detect_t5_key(raw_positive_tokens, raw_negative_tokens)
+        if t5_key is None:
+            expected = ", ".join(SUPPORTED_T5_KEYS)
+            available = self._available_token_keys(raw_positive_tokens, raw_negative_tokens)
+            raise RuntimeError(
+                "ERROR: No supported T5 token stream found. "
+                f"Expected one of: {expected}. Available token streams: {available}."
+            )
+
+        positive_raw_count = self._token_count(raw_positive_tokens, t5_key)
+        negative_raw_count = self._token_count(raw_negative_tokens, t5_key)
+        requested_target = max(0, int(target))
+        effective_target = max(requested_target, positive_raw_count, negative_raw_count)
+
+        encoder = tokenizer.clone()
+        self._set_t5_options(encoder, min_padding=0)
+        encoder.set_tokenizer_option(f"{t5_key}_min_length", effective_target)
+
+        positive_tokens = encoder.tokenize(positive)
+        negative_tokens = encoder.tokenize(negative)
+        cond_positive = encoder.encode_from_tokens_scheduled(positive_tokens)
+        cond_negative = encoder.encode_from_tokens_scheduled(negative_tokens)
+
+        report = (
+            f"T5 key: {t5_key}; "
+            f"positive raw: {positive_raw_count}; "
+            f"negative raw: {negative_raw_count}; "
+            f"requested target: {requested_target}; "
+            f"effective target: {effective_target}"
+        )
+
+        return (
+            cond_positive,
+            cond_negative,
+            positive_raw_count,
+            negative_raw_count,
+            effective_target,
+            report,
+        )
+
+
+NODE_CLASS_MAPPINGS = {
+    "NukunT5EqualLengthBalancer": NukunT5EqualLengthBalancer,
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "NukunT5EqualLengthBalancer": "T5 Equal-Length Prompt Balancer (Nukun)",
+}
