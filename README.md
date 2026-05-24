@@ -13,7 +13,7 @@ git clone https://github.com/OnekoSL/Nukun_ComfyUI_Nodes.git
 
 Restart ComfyUI after installation.
 
-`requirements.txt` is intentionally empty because the nodes use ComfyUI's bundled dependencies (`torch`, `numpy`, `Pillow`, and ComfyUI internals).
+`requirements.txt` lists the small runtime packages imported directly by these nodes. PyTorch is intentionally not listed because ComfyUI manages the correct `torch` build for your hardware.
 
 ## Optional companion nodes
 
@@ -204,7 +204,7 @@ The outputs are the final refined image, the raw upscaled image, and the seed.
 
 - Keep public node IDs stable so saved workflows continue to load.
 - Add new personal nodes under `nodes/` and export them from `__init__.py`.
-- Use `requirements.txt` only for package dependencies that are not already bundled with ComfyUI.
+- Keep `torch`, `comfy`, `folder_paths`, `latent_preview`, and other ComfyUI internals out of `requirements.txt`.
 - Do not store models, LoRAs, VAEs, outputs, or workflows in this folder.
 
 ## Test after changes
