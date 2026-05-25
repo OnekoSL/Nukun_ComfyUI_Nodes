@@ -9,7 +9,7 @@ These workflows are curated examples for the current Nukun node set. They are co
 - `nukun_example_03_regional_rect_native_conditioning.json` - three rectangular native conditioning regions with soft mask edges.
 - `nukun_example_04_hiresfix_tiled.json` - optional companion example with first-pass generation followed by `NukunHiResFixTiled`.
 - `nukun_example_05_unet_block_noise_lab.json` - baseline versus conservative `NukunUNetBlockNoisePatch` branch using `NukunCheckpointPairCyclerLoader`.
-- `nukun_example_06_controlled_noise_stages_unet_patch.json` - three ranged `Universal Noise Sampler Advanced` passes with mild UNet block noise modulation.
+- `nukun_example_06_controlled_noise_stages_unet_patch.json` - three ranged `Universal Noise Sampler Advanced` passes with mild UNet block noise modulation. This is a creative reinjection workflow, not an equivalence test: later passes intentionally add fresh low-strength noise for staged texture changes. It is the best starting point for trying expanded profiles such as `pyramid_mix`, `green_test`, `rainbow_mild`, and `wavelet` at controlled strengths.
 
 ## Optional Companion Nodes
 

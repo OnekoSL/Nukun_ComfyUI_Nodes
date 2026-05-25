@@ -56,6 +56,7 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunPonyV7NoiseSampler` - display name `Pony V7 Noise Sampler (Nukun)`, category `Nukun/Sampling`
 - `NukunUniversalNoiseSampler` - display name `Universal Noise Sampler (Nukun)`, category `Nukun/Sampling`
 - `NukunUniversalNoiseSamplerAdvanced` - display name `Universal Noise Sampler Advanced (Nukun)`, category `Nukun/Sampling`
+- `NukunNoiseProfileCycler` - display name `Noise Profile Cycler (Nukun)`, category `Nukun/Sampling`
 - `NukunUNetBlockNoisePatch` - display name `UNet Block Noise Patch (Nukun)`, category `Nukun/Model Patches`
 - `NukunHiResFixTiled` - display name `HiResFix Tiled (Nukun)`, category `Nukun/Sampling`
 
@@ -185,10 +186,12 @@ It requires the `comfyui_densediffusion` custom node package.
 This node replaces `RandomNoise` plus `SamplerCustomAdvanced` with one sampler node.
 It accepts `guider`, `sampler`, `sigmas`, and `latent_image`, then generates random or zero initial noise internally.
 `noise_device = auto` keeps ComfyUI-core-like CPU noise behavior, while `cuda` uses CUDA when available and falls back to CPU otherwise.
-`noise_type` supports `gaussian`, `uniform`, `laplacian`, `pink`, `brown`, `blue`, `violet`, `pyramid`, and `perlin`.
+`noise_type` supports `gaussian`, `uniform`, `laplacian`, `pink`, `brown`, `blue`, `violet`, `pyramid`, `perlin`, `studentt`, `white`, `grey`, `velvet`, `green_test`, `highres_pyramid`, `pyramid_discount5`, `pyramid_mix`, `rainbow_mild`, `rainbow_intense`, and `wavelet`.
 Use `noise_strength` as a multiplier for the generated noise; `gaussian` + `auto` + `1.0` is the stable ComfyUI-compatible default.
 Disabling `add_noise` still produces zero noise and ignores the selected noise type.
 The `seed` output exposes the final `noise_seed` value for filenames, logging, or downstream helper nodes.
+The expanded profiles are Sonar-inspired but implemented directly in Nukun; they do not require `ComfyUI-sonar`.
+`green_test`, `rainbow_intense`, `velvet`, and `wavelet` are stronger experimental profiles and are usually easier to control in partial denoise or multi-stage Advanced Sampler passes.
 
 ## Illustrious Noise Sampler
 
@@ -210,10 +213,11 @@ The node keeps zero-noise mode, CPU/CUDA noise selection, nested latent support,
 
 This node is the preferred combined sampler for new Nukun workflows.
 It keeps the same sampler behavior and outputs as the other Nukun sampler nodes, but exposes all basic and composite profiles through one `noise_profile` combo.
-Basic profiles are `gaussian`, `uniform`, `laplacian`, `pink`, `brown`, `blue`, `violet`, `pyramid`, and `perlin`.
+Basic profiles are `gaussian`, `uniform`, `laplacian`, `pink`, `brown`, `blue`, `violet`, `pyramid`, `perlin`, `studentt`, `white`, `grey`, `velvet`, `green_test`, `highres_pyramid`, `pyramid_discount5`, `pyramid_mix`, `rainbow_mild`, `rainbow_intense`, and `wavelet`.
 Composite profiles include `illustrious_balanced`, `illustrious_texture`, `illustrious_composition`, `illustrious_wild`, plus `pony_v7_stage1_gaussian`, `pony_v7_stage2_violet`, `pony_v7_balanced`, `pony_v7_soft`, and `pony_v7_graphic`.
 `noise_strength` scales every profile; `detail_bias` only affects composite profiles.
 Use `gaussian` + `auto` + `1.0` for the stable ComfyUI-core-like baseline, or Pony v7 profiles around `0.55` and `0.50` for the two-pass Pony v7 workflow.
+The Sonar-inspired expanded profiles are dependency-free Nukun implementations. Use the more expressive profiles, especially `green_test`, `rainbow_intense`, `velvet`, and `wavelet`, at lower strengths or in later ranged passes when you want localized texture or style shifts.
 
 ## Universal Noise Sampler Advanced
 
@@ -221,6 +225,16 @@ This node keeps the same noise profiles and outputs as `Universal Noise Sampler 
 Use it for partial denoise passes, multi-stage handoff workflows, or experiments that would otherwise need `KSampler (Advanced)` step ranges.
 The node slices the incoming `SIGMAS` input directly: `start_at_step` is inclusive, `end_at_step = 10000` means continue to the end, and `return_with_leftover_noise = enable` preserves the nonzero final sigma when ending early.
 Existing Universal workflows can swap to this advanced node when they need step ranges; the original Universal node remains stable for compatibility.
+For a continuity handoff that should stay close to a single full pass, add noise only in the first pass. Use `0..N` with leftover noise enabled, then continue with `N..M` and `add_noise = false`, and finish with `M..10000`, `add_noise = false`, and leftover noise disabled.
+Do not set the next pass to `previous end_at_step + 1`; that skips the shared handoff sigma and changes the trajectory.
+Intentional later-pass noise reinjection is still useful for creative texture shifts, but it is not an equivalence test against a single sampler pass.
+Multistep samplers such as `deis_2m` may still differ after splitting because their internal step history restarts at each ranged pass. If a different sampler matches without overlap, keep the clean `N..M` handoff. For history-sensitive multistep samplers, use a small warmup overlap such as `0..20`, `18..30`, `28..10000` to get closer to the single-pass image.
+
+## Noise Profile Cycler
+
+This helper outputs a `noise_profile` combo value for systematic Universal Noise Sampler tests.
+Use `profile_index` with ComfyUI's control-after-generate increment mode, connect `noise_profile` to a Universal sampler, and optionally use `profile_name` in filenames or logs.
+`profile_set` can limit the run to `all`, `basic`, `legacy_basic`, `expanded`, `composite`, `illustrious`, or `pony_v7`; `start_index` and `end_index` further restrict the tested slice and wrap the incrementing index inside that range.
 
 ## UNet Block Noise Patch
 
@@ -238,7 +252,7 @@ It takes an `UPSCALE_MODEL` input, uses the model's native scale through ComfyUI
 The defaults mirror the local Pony v7 tiled workflow: `steps=20`, `cfg=3.5`, `denoise=0.4`, `tile_width=1024`, `tile_height=1024`, `mask_blur=64`, `tile_padding=192`, reference latent enabled, differential diffusion enabled at `0.7`, and tiled decode enabled.
 It also supports Universal Noise Sampler profiles for tiled refinement through `noise_profile`, `noise_strength`, and `detail_bias`.
 The older `noise_type` widget remains for compatibility; if `noise_profile` is left at `gaussian`, legacy `noise_type` values such as `blue` or `violet` are still honored.
-Use `gaussian` + `auto` + `1.0` for ComfyUI-compatible tile noise, or try `pony_v7_stage2_violet`, `illustrious_texture`, `pyramid`, `pink`, or `perlin` for more textured HiResFix redraws.
+Use `gaussian` + `auto` + `1.0` for ComfyUI-compatible tile noise, or try `pony_v7_stage2_violet`, `illustrious_texture`, `pyramid_mix`, `highres_pyramid`, `pink`, or `perlin` for more textured HiResFix redraws.
 The outputs are the final refined image, the raw upscaled image, and the seed.
 It requires the `ComfyUI_UltimateSDUpscale` custom node package.
 

@@ -13,7 +13,28 @@ import latent_preview
 
 
 MAX_SEED = 0xffffffffffffffff
-NOISE_TYPES = ["gaussian", "uniform", "laplacian", "pink", "brown", "blue", "violet", "pyramid", "perlin"]
+NOISE_TYPES = [
+    "gaussian",
+    "uniform",
+    "laplacian",
+    "pink",
+    "brown",
+    "blue",
+    "violet",
+    "pyramid",
+    "perlin",
+    "studentt",
+    "white",
+    "grey",
+    "velvet",
+    "green_test",
+    "highres_pyramid",
+    "pyramid_discount5",
+    "pyramid_mix",
+    "rainbow_mild",
+    "rainbow_intense",
+    "wavelet",
+]
 ILLUSTRIOUS_MODES = ["balanced", "texture", "composition", "wild"]
 PONY_V7_PROFILES = ["stage1_gaussian", "stage2_violet", "balanced", "soft", "graphic"]
 UNIVERSAL_NOISE_PROFILES = (
@@ -141,6 +162,7 @@ def sample_custom_advanced(
         guider.model_patcher,
         latent_samples,
         latent.get("downscale_ratio_spacial", None),
+        latent.get("downscale_ratio_temporal", None),
     )
     latent["samples"] = latent_samples
     sigmas, return_latent = sigmas_for_step_range(
@@ -152,6 +174,7 @@ def sample_custom_advanced(
     if return_latent:
         out = latent.copy()
         out.pop("downscale_ratio_spacial", None)
+        out.pop("downscale_ratio_temporal", None)
         return (out, out, noise_seed)
 
     noise_mask = None
@@ -176,6 +199,7 @@ def sample_custom_advanced(
 
     out = latent.copy()
     out.pop("downscale_ratio_spacial", None)
+    out.pop("downscale_ratio_temporal", None)
     out["samples"] = samples
     if "x0" in x0_output:
         x0_out = guider.model_patcher.model.process_latent_out(x0_output["x0"].cpu())
@@ -274,6 +298,28 @@ def _generate_noise_by_type(shape, latent_image, generator, device, noise_type, 
         noise = _spectral_noise(shape, latent_image, generator, device, SPECTRAL_NOISE_ALPHA[noise_type])
     elif noise_type == "pyramid":
         noise = _pyramid_noise(shape, latent_image, generator, device)
+    elif noise_type == "studentt":
+        noise = _studentt_noise(shape, latent_image, generator, device)
+    elif noise_type == "white":
+        noise = _power_law_noise(shape, latent_image, generator, device, alpha=0.0, use_sign=True)
+    elif noise_type == "grey":
+        noise = _power_law_noise(shape, latent_image, generator, device, alpha=0.0, use_sign=False)
+    elif noise_type == "velvet":
+        noise = _power_law_noise(shape, latent_image, generator, device, alpha=1.0, use_sign=True)
+    elif noise_type == "green_test":
+        noise = _green_test_noise(shape, latent_image, generator, device)
+    elif noise_type == "highres_pyramid":
+        noise = _highres_pyramid_noise(shape, latent_image, generator, device)
+    elif noise_type == "pyramid_discount5":
+        noise = _pyramid_noise(shape, latent_image, generator, device, discount=0.5)
+    elif noise_type == "pyramid_mix":
+        noise = _pyramid_mix_noise(shape, latent_image, generator, device)
+    elif noise_type == "rainbow_mild":
+        noise = _rainbow_noise(shape, latent_image, generator, device, intensity="mild")
+    elif noise_type == "rainbow_intense":
+        noise = _rainbow_noise(shape, latent_image, generator, device, intensity="intense")
+    elif noise_type == "wavelet":
+        noise = _wavelet_noise(shape, latent_image, generator, device)
     elif noise_type == "perlin":
         noise = _perlin_like_noise(shape, latent_image, generator, device)
     else:
@@ -552,7 +598,51 @@ def _spectral_noise(shape, latent_image, generator, device, alpha):
     return torch.fft.ifftn(noise_fft * scale, dim=(-2, -1)).real
 
 
-def _pyramid_noise(shape, latent_image, generator, device):
+def _studentt_noise(shape, latent_image, generator, device):
+    normal = _randn_float32(shape, latent_image, generator, device)
+    chi = sum(_randn_float32(shape, latent_image, generator, device).square() for _ in range(2))
+    noise = normal / torch.sqrt((chi / 2.0).clamp(min=1e-6))
+
+    if noise.ndim > 1:
+        flat = noise.flatten(start_dim=1).abs()
+        quantile = torch.quantile(flat, 0.75, dim=-1)
+        quantile = quantile.reshape(*quantile.shape, *((1,) * (noise.ndim - quantile.ndim)))
+        noise = noise.clamp(-quantile, quantile)
+
+    return torch.sign(noise) * torch.sqrt(noise.abs())
+
+
+def _power_law_noise(shape, latent_image, generator, device, alpha=0.0, use_sign=False):
+    noise = _randn_float32(shape, latent_image, generator, device)
+    modulation = noise.abs().pow(float(alpha))
+    result = torch.sign(noise) if use_sign else noise
+    result = result * modulation
+
+    if len(shape) >= 3:
+        dims = tuple(range(max(1, len(shape) - 3), len(shape)))
+        denom = result.abs().amax(dim=dims, keepdim=True).clamp(min=1e-6)
+        result = result / denom
+
+    return result
+
+
+def _green_test_noise(shape, latent_image, generator, device):
+    if len(shape) < 4:
+        return _randn_float32(shape, latent_image, generator, device)
+
+    noise = _randn_float32(shape, latent_image, generator, device)
+    height = int(shape[-2])
+    width = int(shape[-1])
+    y_freq = torch.fft.fftfreq(height, device=device, dtype=torch.float32).square()
+    x_freq = torch.fft.fftfreq(width, device=device, dtype=torch.float32).square()
+    power = torch.sqrt((y_freq[:, None] + x_freq[None, :]).clamp(min=1e-8))
+    power[0, 0] = 1.0
+    power = power.reshape((1,) * (len(shape) - 2) + (height, width))
+    filtered = torch.fft.ifft2(torch.fft.fft2(noise, dim=(-2, -1)) / torch.sqrt(power), dim=(-2, -1)).real
+    return filtered
+
+
+def _pyramid_noise(shape, latent_image, generator, device, discount=0.7, levels=5, mode="bilinear"):
     if len(shape) < 4:
         return _randn_float32(shape, latent_image, generator, device)
 
@@ -560,9 +650,8 @@ def _pyramid_noise(shape, latent_image, generator, device):
     height = int(base_shape[-2])
     width = int(base_shape[-1])
     noise = _randn_float32(shape, latent_image, generator, device)
-    discount = 0.7
 
-    for level in range(1, 6):
+    for level in range(1, int(levels) + 1):
         scale = 2 ** level
         low_h = max(1, height // scale)
         low_w = max(1, width // scale)
@@ -571,13 +660,74 @@ def _pyramid_noise(shape, latent_image, generator, device):
 
         low_shape = base_shape[:-2] + [low_h, low_w]
         low_noise = _randn_float32(low_shape, latent_image, generator, device)
-        upsampled = _resize_last_two_dims(low_noise, height, width, mode="bilinear")
-        noise = noise + upsampled * (discount ** level)
+        upsampled = _resize_last_two_dims(low_noise, height, width, mode=mode)
+        noise = noise + upsampled * (float(discount) ** level)
 
         if low_h == 1 and low_w == 1:
             break
 
     return noise
+
+
+def _highres_pyramid_noise(shape, latent_image, generator, device):
+    if len(shape) < 4:
+        return _randn_float32(shape, latent_image, generator, device)
+
+    base_shape = list(shape)
+    height = int(base_shape[-2])
+    width = int(base_shape[-1])
+    noise = _uniform_noise(shape, latent_image, generator, device)
+    discount = 0.7
+
+    for level in range(1, 5):
+        scale = level + 1
+        high_h = min(height * scale, 1024)
+        high_w = min(width * scale, 1024)
+        high_shape = base_shape[:-2] + [high_h, high_w]
+        high_noise = _randn_float32(high_shape, latent_image, generator, device)
+        downsampled = _resize_last_two_dims(high_noise, height, width, mode="bilinear")
+        noise = noise + downsampled * (discount ** level)
+
+    return noise
+
+
+def _pyramid_mix_noise(shape, latent_image, generator, device):
+    first = _pyramid_noise(shape, latent_image, generator, device, discount=0.6, levels=5)
+    second = _pyramid_noise(shape, latent_image, generator, device, discount=0.6, levels=5)
+    return first * 0.2 - second * 0.8
+
+
+def _rainbow_noise(shape, latent_image, generator, device, intensity="mild"):
+    green = _green_test_noise(shape, latent_image, generator, device)
+    perlin = _perlin_like_noise(shape, latent_image, generator, device)
+    gaussian = _randn_float32(shape, latent_image, generator, device)
+
+    if intensity == "intense":
+        return green * 0.65 + perlin * 0.25 + gaussian * 0.10
+
+    return green * 0.35 + perlin * 0.40 + gaussian * 0.25
+
+
+def _wavelet_noise(shape, latent_image, generator, device):
+    if len(shape) < 4:
+        return _randn_float32(shape, latent_image, generator, device)
+
+    height = int(shape[-2])
+    width = int(shape[-1])
+    result = torch.zeros(shape, dtype=torch.float32, layout=latent_image.layout, device=device)
+    amplitude = 1.0
+
+    for octave in range(4):
+        raw = _randn_float32(shape, latent_image, generator, device)
+        factor = 2 ** (octave + 1)
+        low_h = max(1, height // factor)
+        low_w = max(1, width // factor)
+        low = _resize_last_two_dims(raw, low_h, low_w, mode="bilinear")
+        blurred = _resize_last_two_dims(low, height, width, mode="bilinear")
+        result = result + (raw - blurred) * amplitude
+        amplitude *= 0.5
+
+    return result
 
 
 def _perlin_like_noise(shape, latent_image, generator, device):
@@ -605,7 +755,10 @@ def _perlin_like_noise(shape, latent_image, generator, device):
 def _resize_last_two_dims(tensor, height, width, mode):
     original_shape = tensor.shape
     flat = tensor.reshape(-1, 1, original_shape[-2], original_shape[-1])
-    resized = F.interpolate(flat, size=(height, width), mode=mode, align_corners=False)
+    if mode in {"linear", "bilinear", "bicubic", "trilinear"}:
+        resized = F.interpolate(flat, size=(height, width), mode=mode, align_corners=False)
+    else:
+        resized = F.interpolate(flat, size=(height, width), mode=mode)
     return resized.reshape(*original_shape[:-2], height, width)
 
 
