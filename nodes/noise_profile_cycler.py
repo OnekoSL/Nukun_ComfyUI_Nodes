@@ -29,7 +29,7 @@ class NukunNoiseProfileCycler:
                         "min": 0,
                         "max": 10000,
                         "control_after_generate": True,
-                        "tooltip": "Index to cycle through the selected profile set. Use increment after queueing for systematic tests.",
+                        "tooltip": "Incrementable test counter. The selected profile wraps inside start_index..end_index.",
                     },
                 ),
                 "profile_set": (
@@ -75,7 +75,7 @@ class NukunNoiseProfileCycler:
             low, high = high, low
 
         cycle_size = high - low + 1
-        wrapped_index = low + ((int(profile_index) - low) % cycle_size)
+        wrapped_index = low + (int(profile_index) % cycle_size)
         profile_name = profiles[wrapped_index]
         return (profile_name, profile_name, wrapped_index, int(profile_index), count)
 
