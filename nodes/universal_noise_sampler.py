@@ -97,10 +97,140 @@ class NukunUniversalNoiseSampler:
         return sample_custom_advanced(guider, sampler, sigmas, latent_image, noise, noise_seed)
 
 
+class NukunUniversalNoiseSamplerAdvanced:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "guider": ("GUIDER",),
+                "sampler": ("SAMPLER",),
+                "sigmas": ("SIGMAS",),
+                "latent_image": ("LATENT",),
+                "add_noise": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "Generate noise from the selected Nukun profile. Disable this to sample with zero noise.",
+                    },
+                ),
+                "noise_seed": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": MAX_SEED,
+                        "control_after_generate": True,
+                        "tooltip": "Seed used for the selected noise profile.",
+                    },
+                ),
+                "noise_device": (
+                    ["auto", "cpu", "cuda"],
+                    {
+                        "default": "auto",
+                        "tooltip": "auto uses CPU for ComfyUI-core-like reproducibility. cuda falls back to CPU when unavailable.",
+                    },
+                ),
+                "noise_profile": (
+                    UNIVERSAL_NOISE_PROFILES,
+                    {
+                        "default": "gaussian",
+                        "tooltip": "Basic noise type or composite Nukun profile.",
+                    },
+                ),
+                "noise_strength": (
+                    "FLOAT",
+                    {
+                        "default": 1.0,
+                        "min": 0.0,
+                        "max": 5.0,
+                        "step": 0.01,
+                        "tooltip": "Final noise multiplier. For gaussian + auto, 1.0 keeps ComfyUI-core-like behavior.",
+                    },
+                ),
+                "detail_bias": (
+                    "FLOAT",
+                    {
+                        "default": 0.35,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": "Only affects composite profiles. Lower values emphasize larger forms; higher values emphasize details.",
+                    },
+                ),
+                "start_at_step": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 10000,
+                        "tooltip": "First sigma step to sample, matching KSampler Advanced start_at_step semantics.",
+                    },
+                ),
+                "end_at_step": (
+                    "INT",
+                    {
+                        "default": 10000,
+                        "min": 0,
+                        "max": 10000,
+                        "tooltip": "Last sigma step boundary. 10000 means continue to the end of the incoming sigmas.",
+                    },
+                ),
+                "return_with_leftover_noise": (
+                    ["disable", "enable"],
+                    {
+                        "default": "disable",
+                        "tooltip": "Disable forces full denoise when ending early. Enable preserves leftover noise for a later pass.",
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("LATENT", "LATENT", "INT")
+    RETURN_NAMES = ("output", "denoised_output", "seed")
+    FUNCTION = "sample"
+    CATEGORY = "Nukun/Sampling"
+    DESCRIPTION = "Universal Noise Sampler with KSampler Advanced-style step range controls."
+
+    def sample(
+        self,
+        guider,
+        sampler,
+        sigmas,
+        latent_image,
+        add_noise,
+        noise_seed,
+        noise_device,
+        noise_profile="gaussian",
+        noise_strength=1.0,
+        detail_bias=0.35,
+        start_at_step=0,
+        end_at_step=10000,
+        return_with_leftover_noise="disable",
+    ):
+        if add_noise:
+            noise = make_noise_generator(noise_seed, noise_device, noise_profile, noise_strength, detail_bias)
+        else:
+            noise = NukunEmptyNoise()
+
+        return sample_custom_advanced(
+            guider,
+            sampler,
+            sigmas,
+            latent_image,
+            noise,
+            noise_seed,
+            start_at_step,
+            end_at_step,
+            return_with_leftover_noise,
+        )
+
+
 NODE_CLASS_MAPPINGS = {
     "NukunUniversalNoiseSampler": NukunUniversalNoiseSampler,
+    "NukunUniversalNoiseSamplerAdvanced": NukunUniversalNoiseSamplerAdvanced,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "NukunUniversalNoiseSampler": "Universal Noise Sampler (Nukun)",
+    "NukunUniversalNoiseSamplerAdvanced": "Universal Noise Sampler Advanced (Nukun)",
 }

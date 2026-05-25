@@ -123,7 +123,17 @@ def make_noise_generator(seed, noise_device, noise_profile="gaussian", noise_str
     return NukunRandomNoise(seed, noise_device, "gaussian", noise_strength)
 
 
-def sample_custom_advanced(guider, sampler, sigmas, latent_image, noise, noise_seed):
+def sample_custom_advanced(
+    guider,
+    sampler,
+    sigmas,
+    latent_image,
+    noise,
+    noise_seed,
+    start_at_step=0,
+    end_at_step=10000,
+    return_with_leftover_noise="disable",
+):
     latent = latent_image
     latent_samples = latent["samples"]
     latent = latent.copy()
@@ -133,6 +143,16 @@ def sample_custom_advanced(guider, sampler, sigmas, latent_image, noise, noise_s
         latent.get("downscale_ratio_spacial", None),
     )
     latent["samples"] = latent_samples
+    sigmas, return_latent = sigmas_for_step_range(
+        sigmas,
+        start_at_step,
+        end_at_step,
+        return_with_leftover_noise,
+    )
+    if return_latent:
+        out = latent.copy()
+        out.pop("downscale_ratio_spacial", None)
+        return (out, out, noise_seed)
 
     noise_mask = None
     if "noise_mask" in latent:
@@ -168,6 +188,29 @@ def sample_custom_advanced(guider, sampler, sigmas, latent_image, noise, noise_s
         out_denoised = out
 
     return (out, out_denoised, noise_seed)
+
+
+def sigmas_for_step_range(sigmas, start_at_step=0, end_at_step=10000, return_with_leftover_noise="disable"):
+    start_at_step = max(0, int(start_at_step))
+    end_at_step = max(0, int(end_at_step))
+    force_full_denoise = return_with_leftover_noise != "enable"
+
+    if sigmas.shape[-1] <= 1:
+        return sigmas, True
+
+    ranged_sigmas = sigmas
+    if end_at_step < (ranged_sigmas.shape[-1] - 1):
+        ranged_sigmas = ranged_sigmas[: end_at_step + 1]
+        if force_full_denoise:
+            ranged_sigmas = ranged_sigmas.clone()
+            ranged_sigmas[-1] = 0
+
+    if start_at_step < (ranged_sigmas.shape[-1] - 1):
+        ranged_sigmas = ranged_sigmas[start_at_step:]
+    else:
+        return ranged_sigmas, True
+
+    return ranged_sigmas, False
 
 
 def generate_nukun_noise_for_tensor(tensor, seed, noise_type="gaussian", noise_strength=1.0):

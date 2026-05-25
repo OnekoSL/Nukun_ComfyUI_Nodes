@@ -17,11 +17,12 @@ Restart ComfyUI after installation.
 
 ## Optional companion nodes
 
-Most nodes work with a standard ComfyUI installation. These wrapper nodes need additional custom-node packages when you use them:
+The main node set and core examples work with a standard ComfyUI installation. These optional integration nodes need additional custom-node packages only when you use those specific workflows:
 
 - `NukunDenseDiffusionSplitApply` and `NukunDenseDiffusionRectApply` need `comfyui_densediffusion`.
 - `NukunHiResFixTiled` needs `ComfyUI_UltimateSDUpscale`.
-- `NukunRegionalSplitRegions` outputs regions compatible with A8R8 `Attention Couple`.
+
+`NukunRegionalSplitRegions` has no runtime dependency on A8R8 by itself; it outputs `ATTENTION_COUPLE_REGION` data for workflows that connect it to A8R8 `Attention Couple`.
 
 ## Included nodes
 
@@ -44,6 +45,8 @@ Most nodes work with a standard ComfyUI installation. These wrapper nodes need a
 - `NukunRegionalSculptPromptEncoder` - display name `Regional Sculpt Prompt Encoder (Nukun)`, category `Nukun/Conditioning`
 - `NukunSplitMasks` - display name `Split Masks (Nukun)`, category `Nukun/Mask`
 - `NukunRegionalRectMasks` - display name `Regional Rect Masks (Nukun)`, category `Nukun/Mask`
+- `NukunNativeRegionalSplitConditioning` - display name `Native Regional Split Conditioning (Nukun)`, category `Nukun/Conditioning`
+- `NukunNativeRegionalRectConditioning` - display name `Native Regional Rect Conditioning (Nukun)`, category `Nukun/Conditioning`
 - `NukunDenseDiffusionSplitApply` - display name `DenseDiffusion Split Apply (Nukun)`, category `Nukun/Conditioning`
 - `NukunDenseDiffusionRectApply` - display name `DenseDiffusion Rect Apply (Nukun)`, category `Nukun/Conditioning`
 - `NukunRegionalSplitRegions` - display name `Regional Split Regions (Nukun)`, category `Nukun/Conditioning`
@@ -52,6 +55,7 @@ Most nodes work with a standard ComfyUI installation. These wrapper nodes need a
 - `NukunIllustriousNoiseSampler` - display name `Illustrious Noise Sampler (Nukun)`, category `Nukun/Sampling`
 - `NukunPonyV7NoiseSampler` - display name `Pony V7 Noise Sampler (Nukun)`, category `Nukun/Sampling`
 - `NukunUniversalNoiseSampler` - display name `Universal Noise Sampler (Nukun)`, category `Nukun/Sampling`
+- `NukunUniversalNoiseSamplerAdvanced` - display name `Universal Noise Sampler Advanced (Nukun)`, category `Nukun/Sampling`
 - `NukunUNetBlockNoisePatch` - display name `UNet Block Noise Patch (Nukun)`, category `Nukun/Model Patches`
 - `NukunHiResFixTiled` - display name `HiResFix Tiled (Nukun)`, category `Nukun/Sampling`
 
@@ -156,17 +160,25 @@ This node creates 2/3 freely placed rectangular masks from percentage coordinate
 Each region has `x`, `y`, `w`, and `h` controls in the 0.0-1.0 image range.
 Use `soft_edge` to blur rectangle edges, and preview `mask_1..3` to tune placement visually.
 
+## Native Regional Conditioning
+
+`Native Regional Split Conditioning (Nukun)` and `Native Regional Rect Conditioning (Nukun)` are dependency-free regional wrappers built on ComfyUI core conditioning metadata.
+They create split or rectangular masks, apply each mask to its regional conditioning with `mask_strength`, and return one combined conditioning output for the sampler positive path.
+Use these for core-first regional workflows when you do not need DenseDiffusion model patching.
+
 ## DenseDiffusion Split Apply
 
-This node wraps `Split Masks`, multiple `DenseDiffusion Add Cond` nodes, and `DenseDiffusion Apply` into one node.
+This optional integration node wraps `Split Masks`, multiple `DenseDiffusion Add Cond` nodes, and `DenseDiffusion Apply` into one node.
 Connect the patched `model` output to the sampler model path and the `conditioning` output to the positive conditioning path.
 For `region_count = 2`, `conditioning_3`, `split_2`, and `strength_3` are ignored and `mask_3` is an empty mask.
+It requires the `comfyui_densediffusion` custom node package.
 
 ## DenseDiffusion Rect Apply
 
-This node wraps `Regional Rect Masks`, multiple `DenseDiffusion Add Cond` nodes, and `DenseDiffusion Apply` into one node.
+This optional integration node wraps `Regional Rect Masks`, multiple `DenseDiffusion Add Cond` nodes, and `DenseDiffusion Apply` into one node.
 Use it instead of `DenseDiffusion Split Apply` when the regional areas should be freely positioned rectangles instead of full-height or full-width splits.
 For DenseDiffusion safety, uncovered pixels are internally assigned to all active region masks so empty attention areas do not produce black/NaN images.
+It requires the `comfyui_densediffusion` custom node package.
 
 ## Advanced Noise Sampler
 
@@ -203,6 +215,13 @@ Composite profiles include `illustrious_balanced`, `illustrious_texture`, `illus
 `noise_strength` scales every profile; `detail_bias` only affects composite profiles.
 Use `gaussian` + `auto` + `1.0` for the stable ComfyUI-core-like baseline, or Pony v7 profiles around `0.55` and `0.50` for the two-pass Pony v7 workflow.
 
+## Universal Noise Sampler Advanced
+
+This node keeps the same noise profiles and outputs as `Universal Noise Sampler (Nukun)`, then adds `start_at_step`, `end_at_step`, and `return_with_leftover_noise`.
+Use it for partial denoise passes, multi-stage handoff workflows, or experiments that would otherwise need `KSampler (Advanced)` step ranges.
+The node slices the incoming `SIGMAS` input directly: `start_at_step` is inclusive, `end_at_step = 10000` means continue to the end, and `return_with_leftover_noise = enable` preserves the nonzero final sigma when ending early.
+Existing Universal workflows can swap to this advanced node when they need step ranges; the original Universal node remains stable for compatibility.
+
 ## UNet Block Noise Patch
 
 This experimental model patch injects separate noise into UNet `input`, `middle`, and `output` block groups.
@@ -214,13 +233,14 @@ Input and output strengths are spread across their repeated UNet blocks, while m
 
 ## HiResFix Tiled
 
-This node wraps model upscaling, optional `ReferenceLatent`, optional `DifferentialDiffusion`, and `Ultimate SD Upscale (No Upscale)` into one compact tiled HiResFix step.
+This optional integration node wraps model upscaling, optional `ReferenceLatent`, optional `DifferentialDiffusion`, and `Ultimate SD Upscale (No Upscale)` into one compact tiled HiResFix step.
 It takes an `UPSCALE_MODEL` input, uses the model's native scale through ComfyUI's `ImageUpscaleWithModel`, then refines the upscaled image with tiled img2img.
 The defaults mirror the local Pony v7 tiled workflow: `steps=20`, `cfg=3.5`, `denoise=0.4`, `tile_width=1024`, `tile_height=1024`, `mask_blur=64`, `tile_padding=192`, reference latent enabled, differential diffusion enabled at `0.7`, and tiled decode enabled.
 It also supports Universal Noise Sampler profiles for tiled refinement through `noise_profile`, `noise_strength`, and `detail_bias`.
 The older `noise_type` widget remains for compatibility; if `noise_profile` is left at `gaussian`, legacy `noise_type` values such as `blue` or `violet` are still honored.
 Use `gaussian` + `auto` + `1.0` for ComfyUI-compatible tile noise, or try `pony_v7_stage2_violet`, `illustrious_texture`, `pyramid`, `pink`, or `perlin` for more textured HiResFix redraws.
 The outputs are the final refined image, the raw upscaled image, and the seed.
+It requires the `ComfyUI_UltimateSDUpscale` custom node package.
 
 ## Maintenance rules
 

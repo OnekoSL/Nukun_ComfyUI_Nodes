@@ -3,6 +3,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import node_helpers
 import torch
 import torch.nn.functional as F
 
@@ -87,6 +88,142 @@ class NukunRegionalRectMasks:
         rects = [(x_1, y_1, w_1, h_1), (x_2, y_2, w_2, h_2), (x_3, y_3, w_3, h_3)]
         masks = _make_rect_masks(region_count, width, height, rects, soft_edge)
         return (masks[0], masks[1], masks[2])
+
+
+class NukunNativeRegionalSplitConditioning:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "conditioning_1": ("CONDITIONING",),
+                "conditioning_2": ("CONDITIONING",),
+                "width": ("INT", {"default": 1024, "min": 8, "max": 16384, "step": 8}),
+                "height": ("INT", {"default": 1024, "min": 8, "max": 16384, "step": 8}),
+                "region_count": ("INT", {"default": 2, "min": 2, "max": 3, "step": 1}),
+                "orientation": (["horizontal", "vertical"],),
+                "split_1": ("FLOAT", {"default": 0.5, "min": 0.01, "max": 0.99, "step": 0.01}),
+                "split_2": ("FLOAT", {"default": 0.67, "min": 0.01, "max": 0.99, "step": 0.01}),
+                "overlap": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.25, "step": 0.01}),
+                "strength_1": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "strength_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "strength_3": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "set_cond_area": (["default", "mask bounds"],),
+            },
+            "optional": {
+                "conditioning_3": ("CONDITIONING",),
+            },
+        }
+
+    RETURN_TYPES = ("CONDITIONING", "MASK", "MASK", "MASK")
+    RETURN_NAMES = ("conditioning", "mask_1", "mask_2", "mask_3")
+    FUNCTION = "apply"
+    CATEGORY = "Nukun/Conditioning"
+    DESCRIPTION = "Builds 2/3 split masks and combines masked conditionings using ComfyUI core metadata."
+
+    def apply(
+        self,
+        conditioning_1,
+        conditioning_2,
+        width,
+        height,
+        region_count,
+        orientation,
+        split_1,
+        split_2,
+        overlap,
+        strength_1,
+        strength_2,
+        strength_3,
+        set_cond_area,
+        conditioning_3=None,
+    ):
+        region_count = 3 if region_count >= 3 else 2
+        conditionings = [conditioning_1, conditioning_2, conditioning_3]
+        strengths = [strength_1, strength_2, strength_3]
+        if region_count == 3 and conditioning_3 is None:
+            raise ValueError("conditioning_3 is required when region_count is 3.")
+
+        masks = _make_split_masks(region_count, orientation, width, height, split_1, split_2, overlap)
+        conditioning = _combine_masked_conditionings(conditionings, masks, strengths, region_count, set_cond_area)
+        return (conditioning, masks[0], masks[1], masks[2])
+
+
+class NukunNativeRegionalRectConditioning:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "conditioning_1": ("CONDITIONING",),
+                "conditioning_2": ("CONDITIONING",),
+                "width": ("INT", {"default": 1024, "min": 8, "max": 16384, "step": 8}),
+                "height": ("INT", {"default": 1024, "min": 8, "max": 16384, "step": 8}),
+                "region_count": ("INT", {"default": 3, "min": 2, "max": 3, "step": 1}),
+                "x_1": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "y_1": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "w_1": ("FLOAT", {"default": 0.34, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "h_1": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "x_2": ("FLOAT", {"default": 0.33, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "y_2": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "w_2": ("FLOAT", {"default": 0.34, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "h_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "x_3": ("FLOAT", {"default": 0.66, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "y_3": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "w_3": ("FLOAT", {"default": 0.34, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "h_3": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "soft_edge": ("INT", {"default": 0, "min": 0, "max": 256, "step": 1}),
+                "strength_1": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "strength_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "strength_3": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "set_cond_area": (["default", "mask bounds"],),
+            },
+            "optional": {
+                "conditioning_3": ("CONDITIONING",),
+            },
+        }
+
+    RETURN_TYPES = ("CONDITIONING", "MASK", "MASK", "MASK")
+    RETURN_NAMES = ("conditioning", "mask_1", "mask_2", "mask_3")
+    FUNCTION = "apply"
+    CATEGORY = "Nukun/Conditioning"
+    DESCRIPTION = "Builds 2/3 rectangular masks and combines masked conditionings using ComfyUI core metadata."
+
+    def apply(
+        self,
+        conditioning_1,
+        conditioning_2,
+        width,
+        height,
+        region_count,
+        x_1,
+        y_1,
+        w_1,
+        h_1,
+        x_2,
+        y_2,
+        w_2,
+        h_2,
+        x_3,
+        y_3,
+        w_3,
+        h_3,
+        soft_edge,
+        strength_1,
+        strength_2,
+        strength_3,
+        set_cond_area,
+        conditioning_3=None,
+    ):
+        region_count = 3 if region_count >= 3 else 2
+        conditionings = [conditioning_1, conditioning_2, conditioning_3]
+        strengths = [strength_1, strength_2, strength_3]
+        if region_count == 3 and conditioning_3 is None:
+            raise ValueError("conditioning_3 is required when region_count is 3.")
+
+        rects = [(x_1, y_1, w_1, h_1), (x_2, y_2, w_2, h_2), (x_3, y_3, w_3, h_3)]
+        masks = _make_rect_masks(region_count, width, height, rects, soft_edge)
+        masks = _ensure_dense_diffusion_coverage(masks, region_count)
+        conditioning = _combine_masked_conditionings(conditionings, masks, strengths, region_count, set_cond_area)
+        return (conditioning, masks[0], masks[1], masks[2])
 
 
 class NukunDenseDiffusionSplitApply:
@@ -406,6 +543,29 @@ def _ensure_dense_diffusion_coverage(masks, region_count):
     return safe_masks
 
 
+def _combine_masked_conditionings(conditionings, masks, strengths, region_count, set_cond_area):
+    set_area_to_bounds = set_cond_area != "default"
+    combined = []
+    for index in range(region_count):
+        conditioning = conditionings[index]
+        if conditioning is None:
+            continue
+        mask = masks[index]
+        if len(mask.shape) < 3:
+            mask = mask.unsqueeze(0)
+        combined.extend(
+            node_helpers.conditioning_set_values(
+                conditioning,
+                {
+                    "mask": mask,
+                    "set_area_to_bounds": set_area_to_bounds,
+                    "mask_strength": strengths[index],
+                },
+            )
+        )
+    return combined
+
+
 def _clamp01(value):
     return max(0.0, min(1.0, float(value)))
 
@@ -442,6 +602,8 @@ def _load_dense_diffusion_nodes():
 NODE_CLASS_MAPPINGS = {
     "NukunSplitMasks": NukunSplitMasks,
     "NukunRegionalRectMasks": NukunRegionalRectMasks,
+    "NukunNativeRegionalSplitConditioning": NukunNativeRegionalSplitConditioning,
+    "NukunNativeRegionalRectConditioning": NukunNativeRegionalRectConditioning,
     "NukunDenseDiffusionSplitApply": NukunDenseDiffusionSplitApply,
     "NukunDenseDiffusionRectApply": NukunDenseDiffusionRectApply,
     "NukunRegionalSplitRegions": NukunRegionalSplitRegions,
@@ -450,6 +612,8 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "NukunSplitMasks": "Split Masks (Nukun)",
     "NukunRegionalRectMasks": "Regional Rect Masks (Nukun)",
+    "NukunNativeRegionalSplitConditioning": "Native Regional Split Conditioning (Nukun)",
+    "NukunNativeRegionalRectConditioning": "Native Regional Rect Conditioning (Nukun)",
     "NukunDenseDiffusionSplitApply": "DenseDiffusion Split Apply (Nukun)",
     "NukunDenseDiffusionRectApply": "DenseDiffusion Rect Apply (Nukun)",
     "NukunRegionalSplitRegions": "Regional Split Regions (Nukun)",
