@@ -21,6 +21,7 @@ The main node set and core examples work with a standard ComfyUI installation. T
 
 - `NukunDenseDiffusionSplitApply` and `NukunDenseDiffusionRectApply` need `comfyui_densediffusion`.
 - `NukunHiResFixTiled` needs `ComfyUI_UltimateSDUpscale`.
+- `NukunTiledHiResFixAdvanced` needs `ComfyUI_TiledKSampler`.
 
 `NukunRegionalSplitRegions` has no runtime dependency on A8R8 by itself; it outputs `ATTENTION_COUPLE_REGION` data for workflows that connect it to A8R8 `Attention Couple`.
 
@@ -59,6 +60,7 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunNoiseProfileCycler` - display name `Noise Profile Cycler (Nukun)`, category `Nukun/Sampling`
 - `NukunUNetBlockNoisePatch` - display name `UNet Block Noise Patch (Nukun)`, category `Nukun/Model Patches`
 - `NukunHiResFixTiled` - display name `HiResFix Tiled (Nukun)`, category `Nukun/Sampling`
+- `NukunTiledHiResFixAdvanced` - display name `Tiled HiRes Fix Advanced (Nukun)`, category `Nukun/Sampling`
 
 ## Checkpoint Cycler Loader
 
@@ -255,6 +257,17 @@ The older `noise_type` widget remains for compatibility; if `noise_profile` is l
 Use `gaussian` + `auto` + `1.0` for ComfyUI-compatible tile noise, or try `pony_v7_stage2_violet`, `illustrious_texture`, `pyramid_mix`, `highres_pyramid`, `pink`, or `perlin` for more textured HiResFix redraws.
 The outputs are the final refined image, the raw upscaled image, and the seed.
 It requires the `ComfyUI_UltimateSDUpscale` custom node package.
+
+## Tiled HiRes Fix Advanced
+
+This node is a core-first tiled HiResFix wrapper without Ultimate SD Upscale.
+It uses ComfyUI's `ImageUpscaleWithModel`, tiled VAE encode/decode, optional `ReferenceLatent`, optional `DifferentialDiffusion`, and `ComfyUI_TiledKSampler` sampling behavior.
+The tiled refine pass supports the Nukun Universal noise profiles through `noise_profile`, `noise_strength`, and `detail_bias`.
+The default `tiling_strategy` is `simple` and tile previews are disabled for speed; switch to `random` when hiding seams matters more than runtime.
+Use `denoise = 0` to skip sampling and only return the upscaled tiled VAE round trip.
+Outputs are `final_image`, `upscaled_image`, `refined_latent`, `seed`, and a `settings_report` string for comparisons.
+FreeU, SpotDiffusion, and TiledDiffusion should stay as external model patches before this node when you want to test them.
+It requires the optional `ComfyUI_TiledKSampler` custom node package.
 
 ## Maintenance rules
 
