@@ -24,6 +24,8 @@ OUTPUT_FILES = {
     "dark_gore": "little_doom_dark_gore.csv",
 }
 
+BLANK_LINE_RE = re.compile(r"\n\s*\n+")
+
 
 CHARACTER_SOURCE_TOKENS = {
     "anime",
@@ -474,7 +476,13 @@ def has_any(term: str, keywords: set[str], phrases: set[str] | None = None) -> b
 
 def parse_terms(source: Path) -> list[str]:
     text = source.read_text(encoding="utf-8-sig")
-    terms = [part.strip() for part in text.split(",")]
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = BLANK_LINE_RE.sub(",", text)
+
+    terms = []
+    for part in text.split(","):
+        lines = [line.strip() for line in part.strip().split("\n")]
+        terms.append(" ".join(line for line in lines if line))
     return [term for term in terms if term]
 
 
