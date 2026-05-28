@@ -97,6 +97,7 @@ It can use `ComfyUI/user/vocab.json` or bundled files such as `resources/english
 Set `amount` for the number of words and use the `seed` widget's control-after-generate behavior to keep, increment, decrement, or randomize selections between queued runs.
 Words are sampled without duplicates; if `amount` is larger than the available vocabulary, the output is clamped to the full list.
 Bundled category vocabularies include places/environments, objects, animals and mythical creatures, verbs, nouns, adjectives, `*ing` words, person names, countries, and cities.
+Bundled Little Doom LoRA keyword resources are also available as `little_doom_*.csv`, including clean, character/source, visual feature, clothing, action, setting, style, mature, and dark/gore subsets.
 Connect the optional `chain` input to append generated words after an existing string and build prompt chains.
 
 ## Regional Split Regions
