@@ -9,11 +9,27 @@ def _vocab_path():
     return os.path.join(folder_paths.get_user_directory(), "vocab.json")
 
 
-def _load_words():
-    path = _vocab_path()
-    if not os.path.exists(path):
-        raise RuntimeError(f"Random Vocab String List: vocab file not found: {path}")
+def _bundled_vocab_path():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "resources", "vocab.json"))
 
+
+def _resolve_vocab_path():
+    user_path = _vocab_path()
+    if os.path.exists(user_path):
+        return user_path
+
+    bundled_path = _bundled_vocab_path()
+    if os.path.exists(bundled_path):
+        return bundled_path
+
+    raise RuntimeError(
+        "Random Vocab String List: vocab file not found. Expected "
+        f"{user_path} or bundled fallback {bundled_path}"
+    )
+
+
+def _load_words():
+    path = _resolve_vocab_path()
     with open(path, "r", encoding="utf-8") as vocab_file:
         text = vocab_file.read()
 
@@ -65,7 +81,11 @@ class NukunRandomVocabStringList:
 
     @classmethod
     def IS_CHANGED(cls, amount, seed):
-        path = _vocab_path()
+        try:
+            path = _resolve_vocab_path()
+        except RuntimeError:
+            path = ""
+
         digest = hashlib.sha256()
         digest.update(str(int(amount)).encode("utf-8"))
         digest.update(str(int(seed)).encode("utf-8"))

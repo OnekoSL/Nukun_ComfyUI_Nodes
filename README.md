@@ -93,6 +93,7 @@ It exposes one integer widget with ComfyUI's control-after-generate support and 
 ## Random Vocab String List
 
 This node reads `ComfyUI/user/vocab.json` as a comma-separated plain-text word list and outputs a deterministic random space-separated string.
+If the user file is missing, it falls back to the bundled `resources/vocab.json` word list included with this node pack.
 Set `amount` for the number of words and use the `seed` widget's control-after-generate behavior to keep, increment, decrement, or randomize selections between queued runs.
 Words are sampled without duplicates; if `amount` is larger than the available vocabulary, the output is clamped to the full list.
 
