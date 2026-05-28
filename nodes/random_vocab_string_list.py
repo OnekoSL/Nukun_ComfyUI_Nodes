@@ -79,6 +79,18 @@ class NukunRandomVocabStringList:
     @classmethod
     def INPUT_TYPES(cls):
         return {
+            "optional": {
+                "chain": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "defaultInput": True,
+                        "forceInput": True,
+                        "multiline": False,
+                        "tooltip": "Optional incoming string. When connected, generated words are appended after it.",
+                    },
+                ),
+            },
             "required": {
                 "vocab_file": (
                     _available_vocab_files(),
@@ -113,13 +125,17 @@ class NukunRandomVocabStringList:
     RETURN_NAMES = ("STRING",)
     FUNCTION = "generate"
     CATEGORY = "Nukun/Text"
-    DESCRIPTION = "Outputs a deterministic random space-separated word list from a selectable vocabulary file."
+    DESCRIPTION = "Outputs a deterministic random space-separated word list from a selectable vocabulary file, optionally appended to an incoming string."
 
-    def generate(self, vocab_file, amount, seed):
+    def generate(self, vocab_file, amount, seed, chain=""):
         words = _load_words(vocab_file)
         pick_count = min(int(amount), len(words))
         selected = random.Random(int(seed)).sample(words, pick_count)
-        return (" ".join(selected),)
+        generated = " ".join(selected)
+        chain = chain.strip()
+        if chain:
+            return (f"{chain} {generated}",)
+        return (generated,)
 
     @classmethod
     def IS_CHANGED(cls, vocab_file, amount, seed):

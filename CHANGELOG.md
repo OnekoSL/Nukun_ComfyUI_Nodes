@@ -3,6 +3,7 @@
 ## v0.3.0
 
 - Added `Random Vocab String List (Nukun)` for deterministic random word-list prompt strings from `ComfyUI/user/vocab.json`.
+- Added an optional `chain` input to `Random Vocab String List (Nukun)` for prompt chaining.
 - Added a bundled fallback vocabulary at `resources/vocab.json`.
 - Added `resources/english_words.csv` and selectable vocabulary files for `Random Vocab String List (Nukun)`.
 - Added categorized vocabulary files for places/environments, objects, `*ing` words, person names, countries, and cities.
