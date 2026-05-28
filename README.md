@@ -96,6 +96,7 @@ This node reads a selected comma-separated plain-text word list and outputs a de
 It can use `ComfyUI/user/vocab.json` or bundled files such as `resources/english_words.csv`; add more `.csv`, `.txt`, or `.json` files to `resources/` to make them selectable.
 Set `amount` for the number of words and use the `seed` widget's control-after-generate behavior to keep, increment, decrement, or randomize selections between queued runs.
 Words are sampled without duplicates; if `amount` is larger than the available vocabulary, the output is clamped to the full list.
+Bundled category vocabularies include places/environments, objects, `*ing` words, person names, countries, and cities.
 
 ## Regional Split Regions
 
