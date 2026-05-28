@@ -31,6 +31,7 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunCheckpointVaeCyclerLoader` - display name `Checkpoint + VAE Cycler Loader (Nukun)`, category `Nukun/Loaders`
 - `NukunCheckpointPairCyclerLoader` - display name `Checkpoint Pair Cycler Loader (Nukun)`, category `Nukun/Loaders`
 - `NukunIncrementingIntString` - display name `Incrementing Int to String (Nukun)`, category `Nukun/Text`
+- `NukunRandomVocabStringList` - display name `Random Vocab String List (Nukun)`, category `Nukun/Text`
 - `LoadImagewithSubfolders` - display name `Load Image with Subfolders`, category `Nukun/Image`
 - `T5Balancer` - display name `T5 Token-based Prompt Balancer`, category `Nukun/Conditioning`
 - `NukunT5EqualLengthBalancer` - display name `T5 Equal-Length Prompt Balancer (Nukun)`, category `Nukun/Conditioning`
@@ -88,6 +89,12 @@ Use `vae_name = checkpoint` to keep the VAE from `MODEL_2`, or select an externa
 This node replaces the common `Int` plus `Int to String (Mikey)` pattern.
 It exposes one integer widget with ComfyUI's control-after-generate support and outputs a plain string without a commas toggle.
 `min_value` and `max_value` define the output cycle, so incrementing values wrap around in a predictable range.
+
+## Random Vocab String List
+
+This node reads `ComfyUI/user/vocab.json` as a comma-separated plain-text word list and outputs a deterministic random space-separated string.
+Set `amount` for the number of words and use the `seed` widget's control-after-generate behavior to keep, increment, decrement, or randomize selections between queued runs.
+Words are sampled without duplicates; if `amount` is larger than the available vocabulary, the output is clamped to the full list.
 
 ## Regional Split Regions
 
@@ -162,6 +169,7 @@ For `region_count = 2`, `split_2` is ignored and `mask_3` is an empty mask.
 This node creates 2/3 freely placed rectangular masks from percentage coordinates.
 Each region has `x`, `y`, `w`, and `h` controls in the 0.0-1.0 image range.
 Use `soft_edge` to blur rectangle edges, and preview `mask_1..3` to tune placement visually.
+The included browser-side rectangle editor adds a draggable canvas to `Regional Rect Masks`, `Native Regional Rect Conditioning`, and `DenseDiffusion Rect Apply` so region bounds can be adjusted directly in the node UI.
 
 ## Native Regional Conditioning
 
