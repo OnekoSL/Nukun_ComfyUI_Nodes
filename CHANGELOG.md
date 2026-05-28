@@ -6,6 +6,7 @@
 - Added a bundled fallback vocabulary at `resources/vocab.json`.
 - Added `resources/english_words.csv` and selectable vocabulary files for `Random Vocab String List (Nukun)`.
 - Added categorized vocabulary files for places/environments, objects, `*ing` words, person names, countries, and cities.
+- Added categorized vocabulary files for animals and mythical creatures, verbs, nouns, and adjectives.
 - Added a browser-side rectangle editor for rectangular regional nodes.
 - Added `Tiled HiRes Fix Advanced (Nukun)` for step-ranged tiled HiResFix workflows.
 - Added expanded Universal Noise Sampler profiles and `Noise Profile Cycler (Nukun)`.

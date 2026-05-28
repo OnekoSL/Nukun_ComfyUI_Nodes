@@ -32,12 +32,36 @@ amsterdam athens atlanta auckland bangkok barcelona beijing berlin birmingham bo
 """
 
 
+ANIMALS_MYTHICAL_CREATURES = """
+alligator alpaca ant antelope ape armadillo badger bat bear beaver bee beetle bird bison boar buffalo butterfly camel cat cheetah chicken chimpanzee cobra cow coyote crab crocodile crow deer dog dolphin donkey dragon duck eagle elephant falcon fish flamingo fox frog giraffe goat goose gorilla hamster hare hawk hedgehog hippo horse jaguar jellyfish kangaroo kitten koala leopard lion lizard llama lobster mammoth monkey moose mouse octopus owl panda panther parrot peacock penguin pig pigeon pony rabbit raccoon rat raven rhino rooster salmon shark sheep shrimp skunk snake spider squirrel swan tiger tortoise turkey turtle unicorn whale wolf zebra zombie vampire werewolf dragonborn fairy elf goblin griffin hydra kraken mermaid minotaur ogre phoenix troll
+"""
+
+
+VERBS = """
+accept add admire advise agree aim allow answer appear apply arrive ask bake balance believe build burn call carry change chase choose clean climb close collect combine compare connect cook create cry dance deliver destroy draw drink drive drop eat edit enter escape explore fall feed fight find fly follow generate give grab grow guide help hide hold imagine improve include join jump keep kick kiss laugh learn leave lift listen load look make mix move open paint pass pick place play pull push read remove repair replace ride run save search see select send shape share shoot show sing sit sleep smile sort speak split stand start stop stretch swim take talk teach test throw touch train travel try turn update use validate visit wait walk wash watch wear win write
+"""
+
+
+NOUNS = """
+ability action air animal answer art artist beach beauty book camera car castle chair city color colour country day detail dream energy face family field fire flower food forest friend garden hand heart home house idea image island light line love mask model mountain music name night object ocean paper path person place plant power prompt question rain region river road room school shadow shape sky sound space story street style table texture thing time tool tree village water way window word world
+"""
+
+
+ADJECTIVES = """
+abstract ancient angry artificial beautiful big black blue bright broken calm cinematic clean clear cold colorful colourful complex cool cute dark deep delicate dense detailed dramatic dry empty epic experimental fast fine flat fresh full gentle giant glowing golden good green happy hard heavy high huge light little long loose loud low magic magical modern narrow natural new old open orange pale peaceful pink pretty quiet random red rich rough round sad sharp shiny short simple slow small smooth soft strong subtle tall tiny transparent warm weak wet white wide wild yellow young
+"""
+
+
 SEED_CATEGORIES = {
     "place_environments.csv": PLACE_ENVIRONMENTS,
     "objects.csv": OBJECTS,
     "person_names.csv": PERSON_NAMES,
     "countries.csv": COUNTRIES,
     "cities.csv": CITIES,
+    "animals_mythical_creatures.csv": ANIMALS_MYTHICAL_CREATURES,
+    "verbs.csv": VERBS,
+    "nouns.csv": NOUNS,
+    "adjectives.csv": ADJECTIVES,
 }
 
 
