@@ -32,6 +32,8 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunCheckpointPairCyclerLoader` - display name `Checkpoint Pair Cycler Loader (Nukun)`, category `Nukun/Loaders`
 - `NukunIncrementingIntString` - display name `Incrementing Int to String (Nukun)`, category `Nukun/Text`
 - `NukunRandomVocabStringList` - display name `Random Vocab String List (Nukun)`, category `Nukun/Text`
+- `NukunVocabMultiStringList` - display name `Multi Vocab String List (Nukun)`, category `Nukun/Text`
+- `NukunOllamaPromptRefiner` - display name `Ollama Prompt Refiner (Nukun)`, category `Nukun/Text`
 - `LoadImagewithSubfolders` - display name `Load Image with Subfolders`, category `Nukun/Image`
 - `T5Balancer` - display name `T5 Token-based Prompt Balancer`, category `Nukun/Conditioning`
 - `NukunT5EqualLengthBalancer` - display name `T5 Equal-Length Prompt Balancer (Nukun)`, category `Nukun/Conditioning`
@@ -96,9 +98,24 @@ This node reads a selected comma-separated plain-text word list and outputs a de
 It can use `ComfyUI/user/vocab.json` or bundled files such as `resources/english_words.csv`; add more `.csv`, `.txt`, or `.json` files to `resources/` to make them selectable.
 Set `amount` for the number of words and use the `seed` widget's control-after-generate behavior to keep, increment, decrement, or randomize selections between queued runs.
 Words are sampled without duplicates; if `amount` is larger than the available vocabulary, the output is clamped to the full list.
-Bundled category vocabularies include places/environments, objects, animals and mythical creatures, verbs, nouns, adjectives, `*ing` words, person names, countries, and cities.
+Bundled category vocabularies include places/environments, objects, animals and mythical creatures, verbs, nouns, adjectives, `*ing` words, camera/composition terms, person names, countries, and cities.
 Bundled Little Doom LoRA keyword resources are also available as `little_doom_*.csv`, including clean, character/source, visual feature, clothing, action, setting, style, mature, and dark/gore subsets.
 Connect the optional `chain` input to append generated words after an existing string and build prompt chains.
+
+`Multi Vocab String List (Nukun)` combines four selectable vocab files in one node. Each slot has its own amount and three optional direct word selectors; keep a selector on `(random)` to fill it from the chosen vocabulary. The node returns a combined string plus one output per slot.
+
+## Ollama Prompt Refiner
+
+This node sends a random vocabulary string to a local Ollama model and returns one curated prompt pair for the selected `target_profile`: `pony_v6`, `illustrious`, or `pony_v7`.
+It is designed to sit after `Random Vocab String List (Nukun)` or `Multi Vocab String List (Nukun)`: connect the random `STRING` output to `word_salad`, choose one `target_profile`, then connect `positive` and `negative` to your text encoders.
+The default Ollama endpoint is `http://127.0.0.1:11434` and the default model is `autoren-darkidol-llama-3-1-8b:latest`.
+The `ollama_model` widget is a dropdown populated from the local Ollama `/api/tags` list when ComfyUI loads the node.
+Set `style_cluster` to choose the Pony v7 `style_cluster_XXXX` header value; the default is `430`.
+Use `style_anchor` for fixed character names, LoRA trigger words, quality tags, or motifs that should survive the rewrite even when the random input is noisy.
+The node outputs `positive`, `negative`, and `report`. Pony v6 and Illustrious outputs are normalized without commas to reduce prompt tokens; Pony v7 keeps commas for its structured caption and Danbooru tag block.
+Reka Flash models are sent with their `human: ... <sep> assistant:` prompt format and `<sep>`/`<|endoftext|>` stop strings because the GGUF import uses a plain prompt template.
+The node asks Ollama for strict JSON and retries once with a repair prompt if the model returns malformed JSON.
+This is a breaking output change from older versions that exposed separate `pony_v6_*`, `illustrious_*`, and `pony_v7_*` outputs; reconnect old workflows to `positive` and `negative`.
 
 ## Regional Split Regions
 

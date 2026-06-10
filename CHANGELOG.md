@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.0
+
+- Added `Multi Vocab String List (Nukun)` for combining four selectable vocabulary files with deterministic random fills and optional direct word selectors.
+- Added `resources/camera_composition.csv` for camera, framing, focus, perspective, and composition prompt terms.
+
 ## v0.4.0
 
 - Added deduplicated `little_doom_*.csv` Illustrious LoRA keyword resources and a reproducible generator utility.

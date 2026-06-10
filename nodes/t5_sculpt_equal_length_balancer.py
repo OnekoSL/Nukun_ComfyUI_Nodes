@@ -3,7 +3,7 @@ import numbers
 import torch
 import comfy.model_management as model_management
 
-from .t5_equal_length_balancer import SUPPORTED_T5_KEYS
+from .t5_equal_length_balancer import SUPPORTED_TEXT_STREAM_KEYS
 
 
 SCULPT_METHODS = ("forward", "backward", "maximum_absolute", "add_minimum_absolute")
@@ -26,7 +26,7 @@ class NukunT5SculptEqualLengthBalancer:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "tokenizer": ("CLIP", {"tooltip": "The loaded T5 tokenizer to use."}),
+                "tokenizer": ("CLIP", {"tooltip": "The loaded T5/Qwen tokenizer to use."}),
                 "target": (
                     "INT",
                     {
@@ -78,24 +78,24 @@ class NukunT5SculptEqualLengthBalancer:
     FUNCTION = "balance"
     CATEGORY = "Nukun/Conditioning"
     DESCRIPTION = (
-        "Encodes positive and negative prompts with equal T5 token length, "
-        "optionally sculpting eligible T5 token embeddings before scheduled encoding."
+        "Encodes positive and negative prompts with equal T5/Qwen token length, "
+        "optionally sculpting eligible text token embeddings before scheduled encoding."
     )
 
-    def _set_t5_options(self, clip, min_length=None, min_padding=None):
-        for key in SUPPORTED_T5_KEYS:
+    def _set_text_stream_options(self, clip, min_length=None, min_padding=None):
+        for key in SUPPORTED_TEXT_STREAM_KEYS:
             if min_length is not None:
                 clip.set_tokenizer_option(f"{key}_min_length", min_length)
             if min_padding is not None:
                 clip.set_tokenizer_option(f"{key}_min_padding", min_padding)
 
-    def _detect_t5_key(self, *token_sets):
+    def _detect_text_stream_key(self, *token_sets):
         available = set()
         for tokens in token_sets:
             if isinstance(tokens, dict):
                 available.update(tokens.keys())
 
-        for key in SUPPORTED_T5_KEYS:
+        for key in SUPPORTED_TEXT_STREAM_KEYS:
             if key in available:
                 return key
         return None
@@ -118,14 +118,16 @@ class NukunT5SculptEqualLengthBalancer:
         except (KeyError, TypeError):
             raise RuntimeError(f"ERROR: Token stream '{key}' was not found in tokenizer output.")
 
-    def _get_t5_submodel(self, clip, t5_key):
-        submodel = getattr(clip.cond_stage_model, t5_key, None)
+    def _get_text_submodel(self, clip, stream_key):
+        submodel = getattr(clip.cond_stage_model, stream_key, None)
         if submodel is None:
-            raise RuntimeError(f"ERROR: T5 submodel '{t5_key}' was not found on cond_stage_model.")
+            raise RuntimeError(f"ERROR: Text encoder submodel '{stream_key}' was not found on cond_stage_model.")
         if not hasattr(submodel, "transformer"):
-            raise RuntimeError(f"ERROR: T5 submodel '{t5_key}' has no transformer.")
+            raise RuntimeError(f"ERROR: Text encoder submodel '{stream_key}' has no transformer.")
         if not hasattr(submodel.transformer, "get_input_embeddings"):
-            raise RuntimeError(f"ERROR: T5 submodel '{t5_key}' has no input embeddings accessor.")
+            raise RuntimeError(
+                f"ERROR: Text encoder submodel '{stream_key}' has no input embeddings accessor."
+            )
         return submodel
 
     def _special_token_ids(self, submodel):
@@ -229,9 +231,9 @@ class NukunT5SculptEqualLengthBalancer:
         new_weight = new_weight * pre_mag / new_norm
         return new_weight.detach().cpu(), len(selected_weights)
 
-    def _eligible_entries(self, tokens, t5_key, special_ids):
+    def _eligible_entries(self, tokens, stream_key, special_ids):
         coords = []
-        for batch_index, batch in enumerate(tokens[t5_key]):
+        for batch_index, batch in enumerate(tokens[stream_key]):
             for token_index, token_weight in enumerate(batch):
                 if len(token_weight) < 2:
                     continue
@@ -243,15 +245,15 @@ class NukunT5SculptEqualLengthBalancer:
                 coords.append((batch_index, token_index, int(token_id)))
         return coords
 
-    def _apply_sculpting(self, tokens, t5_key, submodel, intensity, method, normalization, top_k):
+    def _apply_sculpting(self, tokens, stream_key, submodel, intensity, method, normalization, top_k):
         if float(intensity) <= 0 and normalization == "none":
             return 0, 0
 
-        if t5_key not in tokens:
-            raise RuntimeError(f"ERROR: Token stream '{t5_key}' was not found for sculpting.")
+        if stream_key not in tokens:
+            raise RuntimeError(f"ERROR: Token stream '{stream_key}' was not found for sculpting.")
 
         special_ids = self._special_token_ids(submodel)
-        coords = self._eligible_entries(tokens, t5_key, special_ids)
+        coords = self._eligible_entries(tokens, stream_key, special_ids)
         if len(coords) == 0:
             return 0, 0
 
@@ -263,7 +265,7 @@ class NukunT5SculptEqualLengthBalancer:
         mean_coords = []
 
         for batch_index, token_index, token_id in coords:
-            token_weight = tokens[t5_key][batch_index][token_index]
+            token_weight = tokens[stream_key][batch_index][token_index]
             attn_weight = float(token_weight[1])
             if float(intensity) > 0:
                 cache_key = (token_id, method, float(intensity), int(top_k))
@@ -282,17 +284,17 @@ class NukunT5SculptEqualLengthBalancer:
                 mean_mag += torch.norm(new_vector).item()
                 mean_coords.append((batch_index, token_index, attn_weight))
 
-            tokens[t5_key][batch_index][token_index] = (new_vector, attn_weight)
+            tokens[stream_key][batch_index][token_index] = (new_vector, attn_weight)
 
         if normalization in ("mean", "mean * attention") and len(mean_coords) > 0:
             mean_mag /= len(mean_coords)
             for batch_index, token_index, attn_weight in mean_coords:
-                token_vector, current_attn = tokens[t5_key][batch_index][token_index]
+                token_vector, current_attn = tokens[stream_key][batch_index][token_index]
                 norm = torch.norm(token_vector)
                 if norm == 0:
                     continue
                 scale = mean_mag * (attn_weight if normalization == "mean * attention" else 1.0)
-                tokens[t5_key][batch_index][token_index] = (token_vector / norm * scale, current_attn)
+                tokens[stream_key][batch_index][token_index] = (token_vector / norm * scale, current_attn)
 
         del all_weights
         return sculpted_count, neighbor_count
@@ -315,35 +317,35 @@ class NukunT5SculptEqualLengthBalancer:
             raise RuntimeError("ERROR: A valid tokenizer is required.")
 
         measure = tokenizer.clone()
-        self._set_t5_options(measure, min_length=0, min_padding=0)
+        self._set_text_stream_options(measure, min_length=0, min_padding=0)
         raw_positive_tokens = measure.tokenize(positive)
         raw_negative_tokens = measure.tokenize(negative)
 
-        t5_key = self._detect_t5_key(raw_positive_tokens, raw_negative_tokens)
-        if t5_key is None:
-            expected = ", ".join(SUPPORTED_T5_KEYS)
+        stream_key = self._detect_text_stream_key(raw_positive_tokens, raw_negative_tokens)
+        if stream_key is None:
+            expected = ", ".join(SUPPORTED_TEXT_STREAM_KEYS)
             available = self._available_token_keys(raw_positive_tokens, raw_negative_tokens)
             raise RuntimeError(
-                "ERROR: No supported T5 token stream found. "
+                "ERROR: No supported text token stream found. "
                 f"Expected one of: {expected}. Available token streams: {available}."
             )
 
-        positive_raw_count = self._token_count(raw_positive_tokens, t5_key)
-        negative_raw_count = self._token_count(raw_negative_tokens, t5_key)
+        positive_raw_count = self._token_count(raw_positive_tokens, stream_key)
+        negative_raw_count = self._token_count(raw_negative_tokens, stream_key)
         requested_target = max(0, int(target))
         effective_target = max(requested_target, positive_raw_count, negative_raw_count)
 
         encoder = tokenizer.clone()
-        self._set_t5_options(encoder, min_padding=0)
-        encoder.set_tokenizer_option(f"{t5_key}_min_length", effective_target)
-        submodel = self._get_t5_submodel(encoder, t5_key)
+        self._set_text_stream_options(encoder, min_padding=0)
+        encoder.set_tokenizer_option(f"{stream_key}_min_length", effective_target)
+        submodel = self._get_text_submodel(encoder, stream_key)
 
         positive_tokens = encoder.tokenize(positive)
         negative_tokens = encoder.tokenize(negative)
 
         positive_sculpted, positive_neighbors = self._apply_sculpting(
             positive_tokens,
-            t5_key,
+            stream_key,
             submodel,
             positive_intensity,
             positive_method,
@@ -352,7 +354,7 @@ class NukunT5SculptEqualLengthBalancer:
         )
         negative_sculpted, negative_neighbors = self._apply_sculpting(
             negative_tokens,
-            t5_key,
+            stream_key,
             submodel,
             negative_intensity,
             negative_method,
@@ -364,7 +366,7 @@ class NukunT5SculptEqualLengthBalancer:
         cond_negative = encoder.encode_from_tokens_scheduled(negative_tokens)
 
         report = (
-            f"T5 key: {t5_key}; "
+            f"text stream: {stream_key}; "
             f"positive raw: {positive_raw_count}; "
             f"negative raw: {negative_raw_count}; "
             f"requested target: {requested_target}; "
@@ -395,5 +397,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "NukunT5SculptEqualLengthBalancer": "T5 Sculpt Equal-Length Prompt Balancer (Nukun)",
+    "NukunT5SculptEqualLengthBalancer": "T5/Qwen Sculpt Equal-Length Prompt Balancer (Nukun)",
 }

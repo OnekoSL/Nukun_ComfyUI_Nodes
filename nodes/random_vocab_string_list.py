@@ -4,8 +4,18 @@ import random
 
 import folder_paths
 
+try:
+    from aiohttp import web
+    from server import PromptServer
+except ImportError:
+    web = None
+    PromptServer = None
+
 RESOURCE_EXTENSIONS = (".csv", ".txt", ".json")
 USER_VOCAB_LABEL = "user/vocab.json"
+RANDOM_WORD_LABEL = "(random)"
+MULTI_SLOT_COUNT = 4
+MULTI_WORD_COUNT = 3
 
 
 def _vocab_path():
@@ -73,6 +83,65 @@ def _load_words(vocab_file):
         raise RuntimeError(f"Random Vocab String List: vocab file is empty: {path}")
 
     return words
+
+
+def _dedupe_preserve_order(words):
+    seen = set()
+    result = []
+    for word in words:
+        if word in seen:
+            continue
+        seen.add(word)
+        result.append(word)
+    return result
+
+
+def _slot_seed(seed, slot_index):
+    return (int(seed) + (slot_index * 1000003)) & 0xffffffffffffffff
+
+
+def _generate_slot(vocab_file, amount, seed, slot_index, selections):
+    amount = max(0, int(amount))
+    if amount <= 0:
+        return ""
+
+    words = _load_words(vocab_file)
+    wordset = set(words)
+    manual = [
+        str(selection).strip()
+        for selection in selections
+        if str(selection).strip() and str(selection).strip() != RANDOM_WORD_LABEL
+    ]
+    manual = _dedupe_preserve_order([word for word in manual if word in wordset])
+    selected = manual[:amount]
+    remaining_count = amount - len(selected)
+
+    if remaining_count > 0:
+        available = [word for word in words if word not in set(selected)]
+        pick_count = min(remaining_count, len(available))
+        if pick_count > 0:
+            selected.extend(random.Random(_slot_seed(seed, slot_index)).sample(available, pick_count))
+
+    return " ".join(selected)
+
+
+def _register_routes():
+    if web is None or PromptServer is None:
+        return
+
+    routes = PromptServer.instance.routes
+
+    @routes.get("/nukun/vocab/words")
+    async def get_vocab_words(request):
+        vocab_file = request.query.get("file", "")
+        try:
+            words = _load_words(vocab_file)
+        except RuntimeError as error:
+            return web.json_response({"file": vocab_file, "error": str(error)}, status=400)
+        return web.json_response({"file": vocab_file, "words": words})
+
+
+_register_routes()
 
 
 class NukunRandomVocabStringList:
@@ -158,10 +227,130 @@ class NukunRandomVocabStringList:
         return digest.hexdigest()
 
 
+class NukunVocabMultiStringList:
+    @classmethod
+    def INPUT_TYPES(cls):
+        available_files = _available_vocab_files()
+        default_file = USER_VOCAB_LABEL if USER_VOCAB_LABEL in available_files else available_files[0]
+
+        required = {
+            "seed": (
+                "INT",
+                {
+                    "default": 0,
+                    "min": 0,
+                    "max": 0xffffffffffffffff,
+                    "control_after_generate": True,
+                    "tooltip": "Base seed for deterministic random selections across all slots.",
+                },
+            ),
+        }
+
+        for slot in range(1, MULTI_SLOT_COUNT + 1):
+            required[f"vocab_file_{slot}"] = (
+                available_files,
+                {
+                    "default": default_file,
+                    "tooltip": f"Comma-separated word list for slot {slot}.",
+                },
+            )
+            required[f"amount_{slot}"] = (
+                "INT",
+                {
+                    "default": 3,
+                    "min": 0,
+                    "max": 10000,
+                    "tooltip": f"Number of words to output from slot {slot}. Use 0 to disable the slot.",
+                },
+            )
+            for word_index in range(1, MULTI_WORD_COUNT + 1):
+                required[f"word_{slot}_{word_index}"] = (
+                    "STRING",
+                    {
+                        "default": RANDOM_WORD_LABEL,
+                        "multiline": False,
+                        "tooltip": f"Optional fixed word {word_index} for slot {slot}. Keep {RANDOM_WORD_LABEL} to fill randomly.",
+                    },
+                )
+
+        return {
+            "optional": {
+                "chain": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "defaultInput": True,
+                        "forceInput": True,
+                        "multiline": False,
+                        "tooltip": "Optional incoming string. When connected, the combined output is appended after it.",
+                    },
+                ),
+            },
+            "required": required,
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("combined", "slot_1", "slot_2", "slot_3", "slot_4")
+    FUNCTION = "generate"
+    CATEGORY = "Nukun/Text"
+    DESCRIPTION = "Combines four selectable vocabulary files into one deterministic prompt string with optional fixed words per slot."
+
+    def generate(self, seed, chain="", **kwargs):
+        slot_outputs = []
+        for slot in range(1, MULTI_SLOT_COUNT + 1):
+            selections = [kwargs.get(f"word_{slot}_{word_index}", RANDOM_WORD_LABEL) for word_index in range(1, MULTI_WORD_COUNT + 1)]
+            slot_outputs.append(
+                _generate_slot(
+                    kwargs[f"vocab_file_{slot}"],
+                    kwargs[f"amount_{slot}"],
+                    seed,
+                    slot,
+                    selections,
+                )
+            )
+
+        combined_parts = [slot_output for slot_output in slot_outputs if slot_output]
+        combined = " ".join(combined_parts)
+        chain = chain.strip()
+        if chain and combined:
+            combined = f"{chain} {combined}"
+        elif chain:
+            combined = chain
+
+        return (combined, *slot_outputs)
+
+    @classmethod
+    def IS_CHANGED(cls, seed, chain="", **kwargs):
+        digest = hashlib.sha256()
+        digest.update(str(int(seed)).encode("utf-8"))
+        digest.update(str(chain).encode("utf-8"))
+
+        for slot in range(1, MULTI_SLOT_COUNT + 1):
+            vocab_file = kwargs.get(f"vocab_file_{slot}", "")
+            digest.update(str(vocab_file).encode("utf-8"))
+            digest.update(str(int(kwargs.get(f"amount_{slot}", 0))).encode("utf-8"))
+            for word_index in range(1, MULTI_WORD_COUNT + 1):
+                digest.update(str(kwargs.get(f"word_{slot}_{word_index}", RANDOM_WORD_LABEL)).encode("utf-8"))
+
+            try:
+                path = _resolve_vocab_path(vocab_file)
+            except RuntimeError:
+                path = ""
+            if os.path.exists(path):
+                with open(path, "rb") as vocab_file_handle:
+                    digest.update(vocab_file_handle.read())
+            else:
+                digest.update(b"missing")
+
+        return digest.hexdigest()
+
+
 NODE_CLASS_MAPPINGS = {
     "NukunRandomVocabStringList": NukunRandomVocabStringList,
+    "NukunVocabMultiStringList": NukunVocabMultiStringList,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "NukunRandomVocabStringList": "Random Vocab String List (Nukun)",
+    "NukunVocabMultiStringList": "Multi Vocab String List (Nukun)",
 }
