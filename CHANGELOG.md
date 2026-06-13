@@ -2,9 +2,16 @@
 
 ## v0.5.0
 
+- Added `Ollama Prompt Refiner (Nukun)` for local Ollama-based split prompt generation with selectable `pony_v6`, `illustrious`, `pony_v7`, and `z_image` target profiles.
+- Added split prompt outputs for `positive`, `negative`, `report`, `base_prompt`, `foreground_prompt`, and `background_prompt`.
+- Added Z-Image prompt refining support and bundled prompt-design reference notes.
+- Added Qwen-aware conditioning support for the T5 equal-length and sculpt balancer nodes.
 - Added `Multi Vocab String List (Nukun)` for combining four selectable vocabulary files with deterministic random fills and optional direct word selectors.
 - Added `resources/camera_composition.csv` for camera, framing, focus, perspective, and composition prompt terms.
 - Fixed `Ollama Prompt Refiner (Nukun)` model selection so installed Ollama models take priority and the dropdown refreshes from the selected Ollama URL.
+- Improved `Ollama Prompt Refiner (Nukun)` for Reka Flash GGUF models with a compact JSON-only prompt wrapper, fixed context-length choices, and stricter reasoning cleanup.
+- Improved Pony v6 and Illustrious prompt refining with pre-sorted visual candidates and concrete 30-40 word background tag lists.
+- Changed `Ollama Prompt Refiner (Nukun)` to a single-target workflow; older workflows should reconnect to the new shared prompt outputs.
 
 ## v0.4.0
 
