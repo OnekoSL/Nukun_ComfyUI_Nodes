@@ -34,6 +34,7 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunRandomVocabStringList` - display name `Random Vocab String List (Nukun)`, category `Nukun/Text`
 - `NukunVocabMultiStringList` - display name `Multi Vocab String List (Nukun)`, category `Nukun/Text`
 - `NukunOllamaPromptRefiner` - display name `Ollama Prompt Refiner (Nukun)`, category `Nukun/Text`
+- `NukunOllamaVisionCaptioner` - display name `Ollama Vision Captioner (Nukun)`, category `Nukun/Image`
 - `LoadImagewithSubfolders` - display name `Load Image with Subfolders`, category `Nukun/Image`
 - `T5Balancer` - display name `T5 Token-based Prompt Balancer`, category `Nukun/Conditioning`
 - `NukunT5EqualLengthBalancer` - display name `T5 Equal-Length Prompt Balancer (Nukun)`, category `Nukun/Conditioning`
@@ -119,6 +120,26 @@ For `DavidAU/Reka-Flash-3-21B-Reasoning-*` GGUF models, keep `context_length` at
 The `context_length` dropdown offers fixed `num_ctx` values from `2048` to `131072`; `8192` is the default practical baseline.
 The node asks Ollama for strict JSON and retries once with a repair prompt if the model returns malformed JSON.
 This is a breaking output change from older versions that exposed separate `pony_v6_*`, `illustrious_*`, and `pony_v7_*` outputs; reconnect old workflows to `positive` and `negative`.
+
+## Ollama Vision Captioner
+
+This node captions a ComfyUI `IMAGE` with a local Ollama vision model and returns `caption`, `tags`, `text_seed`, and `report`.
+The intended wiring is `IMAGE -> Ollama Vision Captioner (Nukun) -> Ollama Prompt Refiner (Nukun)`: connect `text_seed` to the refiner's `word_salad` or use it as a richer `style_anchor`.
+Backend v1 uses only Ollama's `/api/generate` image support, so it does not add Transformers, llama-cpp-python, or other new Python requirements.
+The default model is `user-v4/joycaption-beta`; JoyCaption Alpha Two can be selected or typed through Ollama as `hf.co/Jobaar/Llama-JoyCaption-Alpha-Two-GGUF:F16` or a local alias such as an `ollama pull`/Modelfile name.
+The `ollama_model` dropdown shares the browser refresh helper used by the Prompt Refiner and keeps the current widget value even when that model is not present in the local `/api/tags` response yet.
+
+`caption_mode` controls the shape of the text:
+
+- `natural_caption` writes two to four readable sentences plus a fuller visible tag list.
+- `danbooru_tags` prefers 24-48 comma-separated booru-style tags.
+- `pony_source` writes 35-65 comma-free factual image words for Pony v6 and Illustrious workflows.
+- `refiner_seed` writes the richest comma-free 40-80 word seed text for the Prompt Refiner and strips final model-control tags such as `score_9`, `rating_*`, and `style_cluster_*`.
+
+Batch behavior is intentionally simple in v1: only `image[0]` is captioned, and `report` mentions the batch size when additional images were present.
+Images are converted from ComfyUI's float tensor format to RGB JPEG, downscaled to `resize_long_edge = 1024` by default while preserving aspect ratio, base64 encoded, and sent in the Ollama `images` field.
+If Ollama returns malformed JSON, the node retries once with a text-only repair prompt; if that also fails, it builds a local fallback from the raw response so the workflow still receives usable text.
+Use an Ollama model with vision support. Text-only models will usually return an Ollama error or captions that ignore the image.
 
 ## Regional Split Regions
 

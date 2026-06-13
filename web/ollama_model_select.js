@@ -1,9 +1,18 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-const TARGET_NODE = "NukunOllamaPromptRefiner";
-const TARGET_DISPLAY_NAME = "Ollama Prompt Refiner (Nukun)";
-const DEFAULT_MODEL = "autoren-darkidol-llama-3-1-8b:latest";
+const TARGET_NODES = [
+    {
+        className: "NukunOllamaPromptRefiner",
+        displayName: "Ollama Prompt Refiner (Nukun)",
+        fallbackModel: "autoren-darkidol-llama-3-1-8b:latest",
+    },
+    {
+        className: "NukunOllamaVisionCaptioner",
+        displayName: "Ollama Vision Captioner (Nukun)",
+        fallbackModel: "user-v4/joycaption-beta",
+    },
+];
 const configuredNodes = new WeakSet();
 const modelCache = new Map();
 
@@ -25,63 +34,78 @@ async function loadModels(ollamaUrl) {
     }
 
     const payload = await response.json();
-    const models = Array.isArray(payload.models) && payload.models.length ? payload.models : [payload.fallback || DEFAULT_MODEL];
+    const models = Array.isArray(payload.models) && payload.models.length ? payload.models : [payload.fallback].filter(Boolean);
     modelCache.set(cacheKey, models);
     return models;
 }
 
-function updateModelWidget(modelWidget, models) {
+function uniqueModels(models) {
+    const result = [];
+    for (const model of models) {
+        const clean = String(model || "").trim();
+        if (clean && !result.includes(clean)) {
+            result.push(clean);
+        }
+    }
+    return result;
+}
+
+function updateModelWidget(modelWidget, models, fallbackModel) {
     if (!modelWidget) {
         return;
     }
 
+    const currentValue = String(modelWidget.value || "").trim();
+    const existingValues = Array.isArray(modelWidget.options?.values) ? modelWidget.options.values : [];
+    const mergedModels = uniqueModels([currentValue, ...existingValues, ...models, fallbackModel]);
+
     modelWidget.type = "combo";
     modelWidget.options = modelWidget.options || {};
-    modelWidget.options.values = models;
+    modelWidget.options.values = mergedModels;
 
-    if (!models.includes(modelWidget.value)) {
-        modelWidget.value = models[0] || DEFAULT_MODEL;
+    if (!mergedModels.includes(modelWidget.value)) {
+        modelWidget.value = currentValue && mergedModels.includes(currentValue) ? currentValue : mergedModels[0] || fallbackModel;
     }
 }
 
-async function refreshModels(node) {
+async function refreshModels(node, config) {
     const urlWidget = widget(node, "ollama_url");
     const modelWidget = widget(node, "ollama_model");
     if (!modelWidget) {
         return;
     }
 
-    let models = [modelWidget.value || DEFAULT_MODEL];
+    let models = [modelWidget.value || config.fallbackModel];
     try {
         models = await loadModels(urlWidget?.value);
     } catch (error) {
         console.warn(`[Nukun] ${error.message}`);
     }
 
-    updateModelWidget(modelWidget, models);
+    updateModelWidget(modelWidget, models, config.fallbackModel);
     app.graph?.setDirtyCanvas?.(true, true);
 }
 
-function isTargetNode(nodeType, nodeData) {
-    return (
-        nodeData?.name === TARGET_NODE ||
-        nodeData?.name === TARGET_DISPLAY_NAME ||
-        nodeType?.comfyClass === TARGET_NODE ||
-        nodeType?.title === TARGET_DISPLAY_NAME
-    );
+function targetConfigFor(nodeType, nodeData) {
+    return TARGET_NODES.find((config) => (
+        nodeData?.name === config.className ||
+        nodeData?.name === config.displayName ||
+        nodeType?.comfyClass === config.className ||
+        nodeType?.title === config.displayName
+    ));
 }
 
-function isTargetNodeInstance(node) {
-    return (
-        node?.comfyClass === TARGET_NODE ||
-        node?.comfyClass === TARGET_DISPLAY_NAME ||
-        node?.type === TARGET_NODE ||
-        node?.type === TARGET_DISPLAY_NAME ||
-        node?.title === TARGET_DISPLAY_NAME
-    );
+function targetConfigForInstance(node) {
+    return TARGET_NODES.find((config) => (
+        node?.comfyClass === config.className ||
+        node?.comfyClass === config.displayName ||
+        node?.type === config.className ||
+        node?.type === config.displayName ||
+        node?.title === config.displayName
+    ));
 }
 
-function setupNode(node) {
+function setupNode(node, config) {
     if (!node || configuredNodes.has(node)) {
         return;
     }
@@ -94,30 +118,32 @@ function setupNode(node) {
         const previousCallback = urlWidget.callback;
         urlWidget.callback = function (value, ...args) {
             const result = previousCallback?.call(this, value, ...args);
-            refreshModels(node);
+            refreshModels(node, config);
             return result;
         };
     }
 
-    refreshModels(node);
+    refreshModels(node, config);
 }
 
 app.registerExtension({
     name: "Nukun.OllamaModelSelect",
     nodeCreated(node) {
-        if (isTargetNodeInstance(node)) {
-            setupNode(node);
+        const config = targetConfigForInstance(node);
+        if (config) {
+            setupNode(node, config);
         }
     },
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (!isTargetNode(nodeType, nodeData)) {
+        const config = targetConfigFor(nodeType, nodeData);
+        if (!config) {
             return;
         }
 
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             const result = onNodeCreated?.apply(this, arguments);
-            setupNode(this);
+            setupNode(this, config);
             return result;
         };
     },
