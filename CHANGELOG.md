@@ -4,6 +4,7 @@
 
 - Added `Multi Vocab String List (Nukun)` for combining four selectable vocabulary files with deterministic random fills and optional direct word selectors.
 - Added `resources/camera_composition.csv` for camera, framing, focus, perspective, and composition prompt terms.
+- Fixed `Ollama Prompt Refiner (Nukun)` model selection so installed Ollama models take priority and the dropdown refreshes from the selected Ollama URL.
 
 ## v0.4.0
 

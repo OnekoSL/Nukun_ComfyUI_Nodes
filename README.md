@@ -106,14 +106,17 @@ Connect the optional `chain` input to append generated words after an existing s
 
 ## Ollama Prompt Refiner
 
-This node sends a random vocabulary string to a local Ollama model and returns one curated prompt pair for the selected `target_profile`: `pony_v6`, `illustrious`, or `pony_v7`.
-It is designed to sit after `Random Vocab String List (Nukun)` or `Multi Vocab String List (Nukun)`: connect the random `STRING` output to `word_salad`, choose one `target_profile`, then connect `positive` and `negative` to your text encoders.
+This node sends a random vocabulary string to a local Ollama model and returns one curated split prompt set for the selected `target_profile`: `pony_v6`, `illustrious`, `pony_v7`, or `z_image`.
+It is designed to sit after `Random Vocab String List (Nukun)` or `Multi Vocab String List (Nukun)`: connect the random `STRING` output to `word_salad`, choose one `target_profile`, then connect the generated prompt outputs to your text encoders.
 The default Ollama endpoint is `http://127.0.0.1:11434` and the default model is `autoren-darkidol-llama-3-1-8b:latest`.
-The `ollama_model` widget is a dropdown populated from the local Ollama `/api/tags` list when ComfyUI loads the node.
+The `ollama_model` widget is populated from the selected Ollama URL's `/api/tags` list and refreshes in the browser when `ollama_url` changes.
 Set `style_cluster` to choose the Pony v7 `style_cluster_XXXX` header value; the default is `430`.
 Use `style_anchor` for fixed character names, LoRA trigger words, quality tags, or motifs that should survive the rewrite even when the random input is noisy.
-The node outputs `positive`, `negative`, and `report`. Pony v6 and Illustrious outputs are normalized without commas to reduce prompt tokens; Pony v7 keeps commas for its structured caption and Danbooru tag block.
-Reka Flash models are sent with their `human: ... <sep> assistant:` prompt format and `<sep>`/`<|endoftext|>` stop strings because the GGUF import uses a plain prompt template.
+For Pony v6 and Illustrious, the node pre-sorts the random words into fixed/base, foreground, background, style, and discarded-noise candidate lists before asking Ollama to write the split prompts. Their `background_prompt` is a concrete 30-40 word tag list of visible background things such as rooms, furniture, windows, city details, trees, mushrooms, crystals, props, and terrain, not an abstract depth/filler chain.
+The node outputs `positive`, `negative`, `report`, `base_prompt`, `foreground_prompt`, and `background_prompt`. Pony v6 and Illustrious split outputs are normalized without commas to reduce prompt tokens; Pony v7 keeps commas for its structured caption and Danbooru tag block.
+Reka Flash models are sent with a compact JSON-only `human: ... <sep> assistant:` wrapper and `<sep>`/`<|endoftext|>` stop strings; this keeps reasoning-model chatter out of the final prompt while still using the model's strong creative rewriting.
+For `DavidAU/Reka-Flash-3-21B-Reasoning-*` GGUF models, keep `context_length` at least `8192`; higher values can help if your Ollama setup has enough memory.
+The `context_length` dropdown offers fixed `num_ctx` values from `2048` to `131072`; `8192` is the default practical baseline.
 The node asks Ollama for strict JSON and retries once with a repair prompt if the model returns malformed JSON.
 This is a breaking output change from older versions that exposed separate `pony_v6_*`, `illustrious_*`, and `pony_v7_*` outputs; reconnect old workflows to `positive` and `negative`.
 

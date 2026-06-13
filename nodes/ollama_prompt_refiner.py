@@ -4,10 +4,18 @@ import re
 import urllib.error
 import urllib.request
 
+try:
+    from aiohttp import web
+    from server import PromptServer
+except ImportError:
+    web = None
+    PromptServer = None
+
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = "autoren-darkidol-llama-3-1-8b:latest"
 DEFAULT_OLLAMA_CONTEXT_LENGTH = 8192
+OLLAMA_CONTEXT_LENGTH_CHOICES = ("2048", "4096", "8192", "16384", "32768", "65536", "131072")
 DEFAULT_STYLE_CLUSTER = 430
 SPLIT_BASE_WORD_RANGE = (10, 20)
 SPLIT_DETAIL_WORD_RANGE = (36, 40)
@@ -173,23 +181,40 @@ STOPWORDS = {
 LOW_VALUE_PROMPT_TERMS = {
     "ac_unit",
     "ability",
+    "amazing",
+    "answer",
+    "answers",
+    "architecture",
     "artificial",
     "baby_bottle",
     "balanced_composition",
+    "beautiful",
     "best",
     "best_quality",
     "charger_cable",
     "change",
+    "chain",
+    "chains",
     "clay",
+    "clear",
     "clean_lineart",
+    "coffee",
+    "compact",
+    "concitable",
+    "concise",
+    "cool",
     "creative",
     "detailed_background",
     "detailed_character_design",
     "dynamic_pose",
+    "dynamic",
     "enable",
     "enabled",
     "enabling",
+    "enjoyable",
     "expressive_face",
+    "feature",
+    "fine",
     "high_detail",
     "masterpiece",
     "remove",
@@ -198,12 +223,39 @@ LOW_VALUE_PROMPT_TERMS = {
     "backgroundless",
     "define",
     "defined",
+    "descriptive",
     "detailed",
     "detail",
     "details",
+    "distant",
+    "empty",
+    "etc",
+    "field",
+    "fields",
+    "filler",
+    "fillers",
+    "finest",
+    "focus",
+    "focused",
+    "good",
+    "great",
     "render",
     "rendered",
     "rendering",
+    "importance",
+    "interesting",
+    "masterpieces",
+    "material",
+    "no",
+    "place",
+    "poynge",
+    "pose",
+    "readable",
+    "reference",
+    "show",
+    "so",
+    "source",
+    "sources",
     "style",
     "overexposed",
     "quality",
@@ -214,13 +266,72 @@ LOW_VALUE_PROMPT_TERMS = {
     "suit",
     "tale",
     "test",
+    "top_notch",
     "unit",
+    "view",
+    "views",
+    "vivid",
     "vivid_colors",
     "wearing",
     "wears",
     "melt",
     "wood",
     "remaining",
+}
+
+GENERATED_TAG_NOISE = {
+    "answer",
+    "answers",
+    "asking",
+    "base",
+    "base_tags",
+    "base_prompt",
+    "background_candidates",
+    "background_prompt",
+    "candidate",
+    "candidates",
+    "character",
+    "current",
+    "current_candidates",
+    "discarded_noise",
+    "empty",
+    "establish",
+    "established",
+    "field",
+    "fields",
+    "fixed_base",
+    "fixed_base_tags",
+    "foreground_candidates",
+    "foreground_prompt",
+    "helper",
+    "instruction",
+    "instructions",
+    "json",
+    "label",
+    "labels",
+    "look",
+    "looks",
+    "main_subject",
+    "must",
+    "none",
+    "other",
+    "placeholder",
+    "prompt",
+    "prompts",
+    "question",
+    "questions",
+    "required",
+    "salad",
+    "style_candidates",
+    "subject",
+    "truth",
+    "unused",
+    "use",
+    "using",
+    "valid",
+    "value",
+    "values",
+    "word",
 }
 
 PONY_V6_BASE_TAGS = (
@@ -303,9 +414,9 @@ def _normalize_tags_url(ollama_url):
     return f"{url.rstrip('/')}/api/tags"
 
 
-def _available_ollama_models():
+def _ollama_model_names(ollama_url=DEFAULT_OLLAMA_URL):
     models = []
-    request = urllib.request.Request(_normalize_tags_url(DEFAULT_OLLAMA_URL), method="GET")
+    request = urllib.request.Request(_normalize_tags_url(ollama_url), method="GET")
     try:
         with urllib.request.urlopen(request, timeout=1) as response:
             data = json.loads(response.read().decode("utf-8"))
@@ -317,9 +428,34 @@ def _available_ollama_models():
         if name and name not in models:
             models.append(name)
 
-    if DEFAULT_OLLAMA_MODEL not in models:
-        models.insert(0, DEFAULT_OLLAMA_MODEL)
+    return models
+
+
+def _available_ollama_models(ollama_url=DEFAULT_OLLAMA_URL):
+    models = _ollama_model_names(ollama_url)
     return models or [DEFAULT_OLLAMA_MODEL]
+
+
+def _register_routes():
+    if web is None or PromptServer is None:
+        return
+
+    routes = PromptServer.instance.routes
+
+    @routes.get("/nukun/ollama/models")
+    async def get_ollama_models(request):
+        ollama_url = request.query.get("url", DEFAULT_OLLAMA_URL)
+        models = _ollama_model_names(ollama_url)
+        return web.json_response(
+            {
+                "url": ollama_url,
+                "models": models,
+                "fallback": DEFAULT_OLLAMA_MODEL if not models else "",
+            }
+        )
+
+
+_register_routes()
 
 
 def _is_reka_flash_model(model):
@@ -327,14 +463,33 @@ def _is_reka_flash_model(model):
     return "reka-flash" in normalized or "reka_flash" in normalized
 
 
+def _reka_output_contract():
+    return """You are a JSON-only image prompt refiner.
+Use the user's prompt-building instructions, but return only the final JSON object.
+Do not reveal reasoning, analysis, markdown, code fences, notes, or commentary.
+Do not output <reasoning>, </reasoning>, <think>, or </think> tags.
+The JSON object must contain exactly these string keys:
+base_prompt, foreground_prompt, background_prompt, negative, report"""
+
+
 def _build_reka_prompt(prompt):
     return (
         "human: "
-        + SYSTEM_INSTRUCTIONS
-        + "\n\nDo not reveal reasoning. Return only the final valid JSON object.\n\n"
+        + _reka_output_contract()
+        + "\n\nTask instructions:\n"
         + str(prompt).strip()
+        + "\n\nFinal answer: return exactly one valid JSON object and nothing else."
         + " <sep> assistant:"
     )
+
+
+def _strip_reasoning_blocks(value):
+    text = str(value).strip()
+    text = re.sub(r"(?is)<\s*reasoning\s*>.*?<\s*/\s*reasoning\s*>", "", text)
+    text = re.sub(r"(?is)<\s*think\s*>.*?<\s*/\s*think\s*>", "", text)
+    text = re.sub(r"(?is)^.*?<\s*/\s*reasoning\s*>", "", text)
+    text = re.sub(r"(?is)^.*?<\s*/\s*think\s*>", "", text)
+    return text.strip()
 
 
 def _request_ollama(ollama_url, model, prompt, seed, temperature, top_p, timeout_seconds, context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH):
@@ -387,7 +542,8 @@ def _request_ollama(ollama_url, model, prompt, seed, temperature, top_p, timeout
     if not envelope.get("done", False):
         raise RuntimeError("Ollama Prompt Refiner: Ollama response did not finish cleanly")
 
-    return str(envelope.get("response", "")).strip()
+    response_text = str(envelope.get("response", "")).strip()
+    return _strip_reasoning_blocks(response_text)
 
 
 def _extract_json_object(text):
@@ -519,12 +675,56 @@ def _has_negative_markers(value):
     return any(marker in lowered for marker in NEGATIVE_MARKERS)
 
 
+def _negative_prompt_is_unusable(value):
+    lowered = str(value).lower()
+    if _word_count(lowered) > 45:
+        return True
+    return any(
+        marker in lowered
+        for marker in (
+            "base_prompt",
+            "fixed_base",
+            "foreground_prompt",
+            "background_prompt",
+            "and so on",
+            "bad focus",
+            "bad teeth",
+            "bad handshakes",
+            "bad handles",
+            "best quality",
+            "best_quality",
+            "conservative model-appropriate",
+            "describes the situation",
+            "do not treat",
+            "dull eyes",
+            "field report",
+            "heart attack",
+            "non aesthetic",
+            "non-artistic",
+            "non desirable",
+            "non-desirable",
+            "non-aesthetic",
+            "non-readable",
+            "non-existent",
+            "not the pony",
+            "non-viable options",
+            "negative words",
+            "positive prompt",
+            "source rating",
+            "target profile",
+            "unpleasant experience",
+            "useless random objects",
+            "weak descriptions",
+        )
+    )
+
+
 def _with_negative_baseline(target_profile, value):
     baseline_terms = NEGATIVE_BASELINES.get(_normalize_target_profile(target_profile))
     if not baseline_terms:
         return value
 
-    if not _has_negative_markers(value):
+    if _negative_prompt_is_unusable(value) or not _has_negative_markers(value):
         return ", ".join(baseline_terms)
 
     result = value
@@ -606,9 +806,8 @@ def _postprocess_result(values, target_profile, word_salad, style_anchor, style_
             "foreground_prompt": foreground_prompt,
             "background_prompt": background_prompt,
         }
-        base_prompt, foreground_prompt, background_prompt = _balanced_tag_prompt_parts(
+        base_prompt, foreground_prompt, background_prompt = _light_tag_prompt_parts(
             target_profile,
-            positive,
             word_salad,
             style_anchor,
             provided if any(provided.values()) else None,
@@ -773,6 +972,154 @@ def _tags_from_terms(terms, limit=18):
     return _dedupe_terms(tags)[:limit]
 
 
+def _term_is_background_like(term):
+    normalized = str(term).lower()
+    return any(_term_matches_keyword(normalized, keyword) for keyword in TAG_PROFILE_BACKGROUND_KEYWORDS)
+
+
+def _term_is_pony_v6_style_like(term):
+    normalized = str(term).lower()
+    return any(_term_matches_keyword(normalized, keyword) for keyword in PONY_V6_STYLE_KEYWORDS)
+
+
+def _tag_is_pony_v6_background_noise(tag):
+    key = _split_tag_key(tag)
+    compact = key.replace(" ", "_")
+    if compact in PONY_V6_FOREGROUND_BLOCKLIST_FOR_BACKGROUND:
+        return True
+    return any(part in PONY_V6_FOREGROUND_BLOCKLIST_FOR_BACKGROUND for part in compact.split("_"))
+
+
+def _pony_v6_background_tags_from_terms(terms, limit=24):
+    tags = []
+    for term in terms:
+        if not _term_is_background_like(term):
+            continue
+        for tag in _tags_from_terms((term,), limit=4):
+            if not _tag_is_pony_v6_background_noise(tag):
+                tags.append(tag)
+    return _dedupe_terms(tags)[:limit]
+
+
+def _pony_v6_foreground_tags_from_terms(terms, limit=36):
+    tags = []
+    for term in terms:
+        if _term_is_background_like(term) or _term_is_pony_v6_style_like(term):
+            continue
+        tags.extend(_tags_from_terms((term,), limit=4))
+    return _dedupe_terms(tags)[:limit]
+
+
+def _candidate_tag_text(tags, fallback="none"):
+    cleaned = [_normalize_split_tag(tag) for tag in tags]
+    cleaned = [tag for tag in _dedupe_split_tags(cleaned) if tag]
+    return " ".join(cleaned) if cleaned else fallback
+
+
+def _candidate_terms_text(terms, fallback="none"):
+    tags = _tags_from_terms(terms, limit=32)
+    return _candidate_tag_text(tags, fallback)
+
+
+def _candidate_discarded_noise(word_salad, style_anchor, limit=18):
+    discarded = []
+    seen = set()
+    for raw_term in re.split(r"[\s,;|]+", str(word_salad).strip()):
+        clean = raw_term.strip(" .:()[]{}\"'")
+        if not clean:
+            continue
+        tag = _prompt_token(clean)
+        key = _split_tag_key(tag)
+        compact = key.replace(" ", "_")
+        if not compact or compact in seen:
+            continue
+        if compact.startswith(("score_", "rating_", "source_")) or _is_model_meta_term(compact):
+            continue
+        if (
+            clean.lower() in STOPWORDS
+            or _is_low_value_prompt_term(compact)
+            or _is_generated_tag_noise(compact)
+        ):
+            discarded.append(compact)
+            seen.add(compact)
+        if len(discarded) >= limit:
+            break
+    return discarded
+
+
+def _generic_foreground_tags_from_terms(terms, limit=36):
+    tags = []
+    for term in terms:
+        if _term_is_background_like(term) or _term_is_pony_v6_style_like(term):
+            continue
+        tags.extend(_tags_from_terms((term,), limit=4))
+    return _dedupe_terms(tags)[:limit]
+
+
+def _style_tags_from_terms(terms, limit=18):
+    tags = []
+    for term in terms:
+        if _term_is_pony_v6_style_like(term):
+            tags.extend(_tags_from_terms((term,), limit=4))
+    return _dedupe_terms(tags)[:limit]
+
+
+def _candidate_data(target_profile, word_salad, style_anchor):
+    target_profile = _normalize_target_profile(target_profile)
+    if target_profile not in ("pony_v6", "illustrious"):
+        return {}
+
+    source_terms = _curated_terms(word_salad, limit=48, filter_low_value=False)
+    anchor_tags = _tokenize_prompt_tags(style_anchor, limit=24, filter_generated_noise=True)
+
+    if target_profile == "pony_v6":
+        fixed_base_tags = list(PONY_V6_BASE_TAGS)
+        fixed_base_tags.extend(anchor_tags)
+        fixed_base_tags.extend(("anime_illustration", "sharp_focus", "clean_linework", "best_quality"))
+        foreground_tags = _pony_v6_foreground_tags_from_terms(source_terms, limit=36)
+    else:
+        fixed_base_tags = list(ILLUSTRIOUS_BASE_TAGS)
+        fixed_base_tags.extend(anchor_tags)
+        fixed_base_tags.extend(("amazing_quality", "very_aesthetic", "polished_illustration", "soft_shading", "sharp_linework"))
+        foreground_tags = _generic_foreground_tags_from_terms(source_terms, limit=36)
+
+    background_tags = _pony_v6_background_tags_from_terms(source_terms, limit=30)
+    background_tags.extend(_tag_profile_background_preset_tags(source_terms))
+    style_tags = _style_tags_from_terms(source_terms, limit=18)
+    discarded_noise = _candidate_discarded_noise(word_salad, style_anchor, limit=18)
+
+    return {
+        "fixed_base_tags": _dedupe_split_tags(fixed_base_tags),
+        "foreground_candidates": _dedupe_split_tags(foreground_tags),
+        "background_candidates": _dedupe_split_tags(background_tags),
+        "style_candidates": _dedupe_split_tags(style_tags),
+        "discarded_noise": _dedupe_split_tags(discarded_noise),
+    }
+
+
+def _build_candidate_context(target_profile, word_salad, style_anchor):
+    data = _candidate_data(target_profile, word_salad, style_anchor)
+    if not data:
+        return ""
+
+    return f"""Pre-sorted candidate ingredients:
+fixed_base_tags: {_candidate_tag_text(data["fixed_base_tags"])}
+foreground_candidates: {_candidate_tag_text(data["foreground_candidates"])}
+background_candidates: {_candidate_tag_text(data["background_candidates"])}
+style_candidates: {_candidate_tag_text(data["style_candidates"])}
+discarded_noise: {_candidate_tag_text(data["discarded_noise"])}
+
+Use the candidate lists as the main source of truth.
+You may add a few fitting visual tags when they clarify the image.
+Do not move foreground candidates into background_prompt.
+Do not move background candidates into foreground_prompt.
+For Pony v6 and Illustrious, write background_prompt as 30 to 40 words of concrete visible background things.
+If background_candidates name a setting, expand that setting with matching visible objects from that same kind of place.
+Do not borrow objects from unrelated example settings.
+Do not copy candidate-list names, empty markers, or instruction words into any output value.
+The raw word salad below is only a reference for context."""
+
+
 FOREGROUND_TAG_FILLERS = (
     "clear_subject",
     "readable_pose",
@@ -843,6 +1190,29 @@ BACKGROUND_TAG_FILLERS = (
     "ambient_detail",
 )
 
+TAG_PROFILE_MINIMAL_BACKGROUND_TAGS = (
+    "quiet_room",
+    "plain_wall",
+    "wooden_floor",
+    "soft_window_light",
+    "small_table",
+    "curtains",
+    "quiet_shelves",
+    "distant_doorway",
+    "ceiling_light",
+    "side_chair",
+    "carpet",
+    "wall_pictures",
+    "potted_plant",
+    "floor_boards",
+    "muted_wallpaper",
+    "shadowed_corner",
+    "wooden_door",
+    "window_frame",
+)
+
+TAG_PROFILE_BACKGROUND_WORD_RANGE = (30, 40)
+
 FOREGROUND_EXPANSIONS = (
     (("latex",), ("glossy_latex", "reflective_material", "tight_surface", "specular_highlights")),
     (("lion",), ("lion_focus", "mane_detail", "fur_texture", "animal_features", "claws")),
@@ -866,8 +1236,144 @@ BACKGROUND_EXPANSIONS = (
     (("group_shot", "group shot"), ("wide_scene_space", "shared_environment", "crowd_spacing", "scene_depth")),
 )
 
+TAG_PROFILE_BACKGROUND_PRESETS = (
+    (
+        ("forest", "woods", "woodland", "wilderness"),
+        (
+            "dark_forest",
+            "tall_trees",
+            "mushrooms",
+            "glowing_crystals",
+            "mossy_ground",
+            "twisted_roots",
+            "misty_path",
+            "fallen_leaves",
+            "tree_trunks",
+            "fern_patches",
+            "shadowed_bushes",
+            "distant_clearing",
+            "wet_stones",
+            "forest_floor",
+            "small_stream",
+            "hollow_log",
+            "moonlit_fog",
+            "scattered_ferns",
+        ),
+    ),
+    (
+        ("room", "living_room", "living room", "indoor", "indoors", "house", "apartment"),
+        (
+            "living_room",
+            "sofa",
+            "window",
+            "curtains",
+            "table_lamp",
+            "carpet",
+            "bookshelves",
+            "coffee_table",
+            "wall_pictures",
+            "wooden_floor",
+            "potted_plant",
+            "city_view",
+            "doorway",
+            "cushions",
+            "soft_window_light",
+            "side_chair",
+            "houseplants",
+            "distant_city_rooftops",
+        ),
+    ),
+    (
+        ("city", "street", "town", "downtown", "german"),
+        (
+            "german_city",
+            "city_street",
+            "apartment_buildings",
+            "lit_windows",
+            "street_lamps",
+            "shop_signs",
+            "pavement",
+            "distant_traffic",
+            "balconies",
+            "brick_walls",
+            "parked_cars",
+            "crosswalk",
+            "tram_lines",
+            "evening_sky",
+            "storefront_windows",
+            "traffic_lights",
+            "distant_rooftops",
+            "wet_asphalt",
+        ),
+    ),
+    (
+        ("airport", "terminal", "station"),
+        (
+            "airport_terminal",
+            "large_windows",
+            "luggage_carts",
+            "departure_boards",
+            "glass_walls",
+            "waiting_seats",
+            "polished_floor",
+            "security_gate",
+            "terminal_signs",
+            "distant_passengers",
+            "overhead_lights",
+            "boarding_area",
+            "metal_railings",
+            "runway_view",
+            "glass_doors",
+            "ceiling_panels",
+            "information_kiosks",
+            "baggage_belts",
+        ),
+    ),
+)
 
-def _tokenize_prompt_tags(value, limit=64):
+TAG_PROFILE_KNOWN_SETTING_KEYS = {
+    "airport",
+    "airport terminal",
+    "apartment",
+    "bathroom",
+    "beach",
+    "bedroom",
+    "city",
+    "city street",
+    "forest",
+    "garden",
+    "german city",
+    "house",
+    "indoor",
+    "indoors",
+    "interior",
+    "kitchen",
+    "living",
+    "living room",
+    "room",
+    "station",
+    "street",
+    "terminal",
+    "town",
+    "wilderness",
+    "woodland",
+    "woods",
+}
+
+
+def _is_generated_tag_noise(tag):
+    key = _split_tag_key(tag)
+    if not key or len(key) <= 1:
+        return True
+    compact = key.replace(" ", "_")
+    if compact.startswith("style_cluster_"):
+        return True
+    if compact in GENERATED_TAG_NOISE or key in GENERATED_TAG_NOISE:
+        return True
+    return _is_low_value_prompt_term(compact)
+
+
+def _tokenize_prompt_tags(value, limit=64, filter_generated_noise=False):
     tags = []
     for raw_term in re.split(r"[\s,;|]+", str(value).strip()):
         raw_clean = raw_term.strip()
@@ -879,6 +1385,7 @@ def _tokenize_prompt_tags(value, limit=64):
             and tag not in STOPWORDS
             and not _is_model_meta_term(tag)
             and not re.fullmatch(r"tag\d+", tag)
+            and not (filter_generated_noise and _is_generated_tag_noise(tag))
         ):
             tags.append(tag)
     return _dedupe_terms(tags)[:limit]
@@ -891,6 +1398,10 @@ def _expand_tags_from_terms(terms, expansions):
         if any(trigger in joined for trigger in triggers):
             tags.extend(expanded_tags)
     return tags
+
+
+def _tag_profile_background_preset_tags(terms):
+    return _expand_tags_from_terms(terms, TAG_PROFILE_BACKGROUND_PRESETS)
 
 
 def _normalize_split_tag(tag):
@@ -916,6 +1427,18 @@ def _split_tag_display(tag):
 def _split_tag_key(tag):
     display = _split_tag_display(tag).lower()
     return re.sub(r"[^a-z0-9]+", " ", display).strip()
+
+
+TAG_PROFILE_BACKGROUND_FILLER_KEYS = {
+    _split_tag_key(tag)
+    for tag in BACKGROUND_TAG_FILLERS
+}
+
+TAG_PROFILE_BACKGROUND_FILLER_WORDS = {
+    word
+    for key in TAG_PROFILE_BACKGROUND_FILLER_KEYS
+    for word in key.split()
+}
 
 
 def _dedupe_split_tags(tags):
@@ -998,24 +1521,205 @@ def _fit_tag_words(tags, min_words, max_words, fillers):
     return _split_tags_text(result)
 
 
+def _meaningful_tag_word_count(tags):
+    meaningful = []
+    for tag in tags:
+        key = _split_tag_key(tag)
+        compact = key.replace(" ", "_")
+        if not compact or compact in GENERATED_TAG_NOISE or compact in LOW_VALUE_PROMPT_TERMS:
+            continue
+        meaningful.append(tag)
+    return _word_count(_split_tags_text(meaningful))
+
+
+def _clean_tag_profile_tags(value, limit=32, keep_quality=False, remove_background_noise=False):
+    tags = []
+    for tag in _tokenize_prompt_tags(value, limit=limit * 4, filter_generated_noise=False):
+        tag = _normalize_split_tag(tag).strip("._:-+")
+        key = _split_tag_key(tag)
+        compact = key.replace(" ", "_")
+        if (
+            not compact
+            or len(compact) <= 1
+            or compact in GENERATED_TAG_NOISE
+            or compact.startswith("style_cluster_")
+            or re.fullmatch(r"v\d+", compact)
+            or _is_model_meta_term(compact)
+        ):
+            continue
+        if not keep_quality and _is_low_value_prompt_term(compact):
+            continue
+        if remove_background_noise:
+            if _tag_is_pony_v6_background_noise(tag) or _term_is_pony_v6_style_like(tag):
+                continue
+            background_noise_parts = {
+                "amazing",
+                "anime",
+                "bad",
+                "illustration",
+                "illustrations",
+                "lines",
+                "linework",
+                "natural",
+                "sharp",
+                "text",
+            }
+            if compact in background_noise_parts or any(part in background_noise_parts for part in compact.split("_")):
+                continue
+        tags.append(tag)
+    return _drop_redundant_split_words(_dedupe_split_tags(tags))[:limit]
+
+
+def _generic_background_only(tags):
+    tags = _dedupe_split_tags(tags)
+    if not tags:
+        return True
+    return all(
+        _split_tag_key(tag) in TAG_PROFILE_BACKGROUND_FILLER_KEYS
+        or _split_tag_key(tag) in TAG_PROFILE_BACKGROUND_FILLER_WORDS
+        for tag in tags
+    )
+
+
+def _drop_background_filler_tags(tags):
+    real_tags = [
+        tag
+        for tag in _dedupe_split_tags(tags)
+        if _split_tag_key(tag) not in TAG_PROFILE_BACKGROUND_FILLER_KEYS
+        and _split_tag_key(tag) not in TAG_PROFILE_BACKGROUND_FILLER_WORDS
+    ]
+    return real_tags or tags
+
+
+def _drop_unrelated_setting_tags(tags, candidate_data):
+    candidate_keys = {
+        _split_tag_key(tag)
+        for tag in candidate_data.get("background_candidates", ())
+    }
+    if not candidate_keys:
+        return tags
+    return [
+        tag
+        for tag in tags
+        if _split_tag_key(tag) not in TAG_PROFILE_KNOWN_SETTING_KEYS
+        or _split_tag_key(tag) in candidate_keys
+    ]
+
+
+def _minimal_background_tags():
+    return list(TAG_PROFILE_MINIMAL_BACKGROUND_TAGS)
+
+
+def _append_background_tags_until_min(result, source_tags):
+    result = _drop_redundant_split_words(_dedupe_split_tags(result))
+    for tag in source_tags:
+        current_words = _word_count(_split_tags_text(result))
+        if current_words >= TAG_PROFILE_BACKGROUND_WORD_RANGE[0]:
+            break
+        candidate = _drop_redundant_split_words(_dedupe_split_tags([*result, tag]))
+        if _word_count(_split_tags_text(candidate)) <= current_words:
+            continue
+        result = candidate
+    return result
+
+
+def _extend_concrete_background_tags(background_tags, candidate_data):
+    result = _drop_background_filler_tags(background_tags)
+    result = _drop_unrelated_setting_tags(result, candidate_data)
+    if _generic_background_only(result):
+        result = []
+
+    candidate_tags = _drop_background_filler_tags(list(candidate_data.get("background_candidates", ())))
+    result = _append_background_tags_until_min(result, candidate_tags)
+    if _word_count(_split_tags_text(result)) < TAG_PROFILE_BACKGROUND_WORD_RANGE[0]:
+        result = _append_background_tags_until_min(result, _minimal_background_tags())
+
+    while _word_count(_split_tags_text(result)) > TAG_PROFILE_BACKGROUND_WORD_RANGE[1] and len(result) > 1:
+        result.pop()
+    return result
+
+
+def _light_tag_prompt_parts(target_profile, word_salad, style_anchor, provided=None):
+    target_profile = _normalize_target_profile(target_profile)
+    provided = provided or {}
+    candidate_data = _candidate_data(target_profile, word_salad, style_anchor)
+
+    provided_base_tags = _clean_tag_profile_tags(provided.get("base_prompt", ""), limit=24, keep_quality=True)
+    fixed_base_tags = list(candidate_data.get("fixed_base_tags", ()))
+    fixed_base_keys = {_split_tag_key(tag) for tag in fixed_base_tags}
+    style_candidate_keys = {_split_tag_key(tag) for tag in candidate_data.get("style_candidates", ())}
+    base_tags = list(fixed_base_tags)
+    for tag in provided_base_tags:
+        key = _split_tag_key(tag)
+        if (
+            _is_protected_split_tag(tag)
+            or key in fixed_base_keys
+            or key in style_candidate_keys
+            or _term_is_pony_v6_style_like(tag)
+        ):
+            base_tags.append(tag)
+    base_tags = _drop_redundant_split_words(_dedupe_split_tags(base_tags))
+    if not base_tags:
+        base_tags = list(candidate_data.get("fixed_base_tags", ()))
+    base_prompt = _split_tags_text(base_tags[:24])
+
+    foreground_tags = _clean_tag_profile_tags(provided.get("foreground_prompt", ""), limit=40)
+    foreground_tags = [
+        tag
+        for tag in foreground_tags
+        if not _term_is_background_like(tag) and not _term_is_pony_v6_style_like(tag)
+    ]
+    if not foreground_tags or _meaningful_tag_word_count(foreground_tags) < 3:
+        foreground_tags = list(candidate_data.get("foreground_candidates", ()))[:28]
+    if not foreground_tags:
+        foreground_tags = ["clear_subject", "readable_pose"]
+    foreground_prompt = _split_tags_text(foreground_tags[:40])
+
+    background_tags = _clean_tag_profile_tags(
+        provided.get("background_prompt", ""),
+        limit=48,
+        remove_background_noise=True,
+    )
+    background_tags = _extend_concrete_background_tags(background_tags, candidate_data)
+    background_prompt = _split_tags_text(background_tags)
+
+    return base_prompt, foreground_prompt, background_prompt
+
+
 def _balanced_tag_prompt_parts(target_profile, value, word_salad, style_anchor, provided=None):
     target_profile = _normalize_target_profile(target_profile)
     provided = provided or {}
-    combined_source = " ".join(
-        str(part)
-        for part in (
-            word_salad,
-            value,
-            provided.get("foreground_prompt", ""),
-            provided.get("background_prompt", ""),
+    if target_profile in ("pony_v6", "illustrious"):
+        combined_source = str(word_salad)
+    else:
+        combined_source = " ".join(
+            str(part)
+            for part in (
+                word_salad,
+                value,
+                provided.get("foreground_prompt", ""),
+                provided.get("background_prompt", ""),
+            )
         )
-    )
     source_terms = _curated_terms(combined_source, limit=48, filter_low_value=False)
-    foreground_terms, background_terms, style_terms, all_terms = _split_pony_v7_terms(word_salad, "", combined_source)
+    foreground_terms, background_terms, style_terms, all_terms = _split_pony_v7_terms(combined_source, "", "")
     anchor_tags = _tokenize_prompt_tags(style_anchor, limit=24)
-    provided_base_tags = _tokenize_prompt_tags(provided.get("base_prompt", ""), limit=24)
-    provided_foreground_tags = _tokenize_prompt_tags(provided.get("foreground_prompt", ""), limit=80)
-    provided_background_tags = _tokenize_prompt_tags(provided.get("background_prompt", ""), limit=80)
+    if target_profile in ("pony_v6", "illustrious"):
+        provided_base_tags = []
+        provided_foreground_tags = []
+        provided_background_tags = []
+    else:
+        provided_base_tags = _tokenize_prompt_tags(provided.get("base_prompt", ""), limit=24, filter_generated_noise=True)
+        provided_foreground_tags = _tokenize_prompt_tags(
+            provided.get("foreground_prompt", ""),
+            limit=80,
+            filter_generated_noise=True,
+        )
+        provided_background_tags = _tokenize_prompt_tags(
+            provided.get("background_prompt", ""),
+            limit=80,
+            filter_generated_noise=True,
+        )
 
     if target_profile == "pony_v6":
         base_tags = list(PONY_V6_BASE_TAGS)
@@ -1037,10 +1741,23 @@ def _balanced_tag_prompt_parts(target_profile, value, word_salad, style_anchor, 
     base_concepts = _split_base_concepts(_tokenize_prompt_tags(base_prompt, limit=40))
 
     source_tags = _tags_from_terms(source_terms, limit=48)
+    if target_profile == "pony_v6":
+        foreground_source_tags = _pony_v6_foreground_tags_from_terms(source_terms, limit=42)
+        background_source_tags = _pony_v6_background_tags_from_terms(source_terms, limit=30)
+    elif target_profile == "illustrious":
+        foreground_source_tags = _generic_foreground_tags_from_terms(source_terms, limit=42)
+        background_source_tags = _pony_v6_background_tags_from_terms(source_terms, limit=30)
+    else:
+        foreground_source_tags = source_tags
+        background_source_tags = _tags_from_terms(background_terms, limit=36)
     foreground_tags = []
     foreground_tags.extend(provided_foreground_tags)
-    foreground_tags.extend(_tags_from_terms(foreground_terms, limit=36))
-    foreground_tags.extend(source_tags)
+    foreground_tags.extend(
+        _tags_from_terms(foreground_terms, limit=36)
+        if target_profile not in ("pony_v6", "illustrious")
+        else []
+    )
+    foreground_tags.extend(foreground_source_tags)
     foreground_tags.extend(_expand_tags_from_terms(source_terms, FOREGROUND_EXPANSIONS))
     foreground_tags.extend(_contextual_pony_v6_tags(source_terms))
     foreground_tags = _remove_base_concept_tags(foreground_tags, base_concepts)
@@ -1051,12 +1768,14 @@ def _balanced_tag_prompt_parts(target_profile, value, word_salad, style_anchor, 
         FOREGROUND_TAG_FILLERS,
     )
 
-    extracted_background = _extract_pony_v7_background_phrase(value)
+    extracted_background = "" if target_profile == "pony_v6" else _extract_pony_v7_background_phrase(value)
     background_tags = []
     background_tags.extend(provided_background_tags)
-    background_tags.extend(_tags_from_terms(background_terms, limit=36))
-    background_tags.extend(_tokenize_prompt_tags(extracted_background, limit=24))
+    background_tags.extend(background_source_tags)
+    background_tags.extend(_tokenize_prompt_tags(extracted_background, limit=24, filter_generated_noise=True))
     background_tags.extend(_expand_tags_from_terms(source_terms, BACKGROUND_EXPANSIONS))
+    if target_profile in ("pony_v6", "illustrious"):
+        background_tags = [tag for tag in background_tags if not _tag_is_pony_v6_background_noise(tag)]
     background_tags = _remove_base_concept_tags(background_tags, base_concepts)
     background_prompt = _fit_tag_words(
         background_tags,
@@ -1285,10 +2004,16 @@ def _strip_leading_pony_v7_tag_preamble(value):
 
 
 PONY_V7_BACKGROUND_KEYWORDS = (
+    "airport",
+    "apartment",
     "background",
     "barren",
     "beach",
+    "bookshelf",
+    "bookshelves",
     "building",
+    "bush",
+    "bushes",
     "castle",
     "church",
     "city",
@@ -1298,10 +2023,13 @@ PONY_V7_BACKGROUND_KEYWORDS = (
     "desk",
     "dock",
     "forest",
+    "floor",
+    "gambia",
     "garden",
     "harbor",
     "harbour",
     "interior",
+    "lamp",
     "landscape",
     "microphone",
     "mountain",
@@ -1313,6 +2041,7 @@ PONY_V7_BACKGROUND_KEYWORDS = (
     "poster",
     "posters",
     "room",
+    "rug",
     "ruined",
     "sail",
     "sea",
@@ -1320,11 +2049,80 @@ PONY_V7_BACKGROUND_KEYWORDS = (
     "shore",
     "shrine",
     "sky",
+    "sofa",
     "street",
+    "table",
     "temple",
+    "tree",
+    "trees",
     "valley",
     "wall",
     "water",
+    "window",
+    "windows",
+    "woods",
+    "mushroom",
+    "mushrooms",
+    "crystal",
+    "crystals",
+)
+
+TAG_PROFILE_EXTRA_BACKGROUND_KEYWORDS = (
+    "bathroom",
+    "bedroom",
+    "brick",
+    "carpet",
+    "chair",
+    "deutsch",
+    "deutsche",
+    "door",
+    "doorway",
+    "evening",
+    "german",
+    "germany",
+    "kitchen",
+    "light",
+    "lights",
+    "living",
+    "shelf",
+    "shelves",
+    "walls",
+)
+
+TAG_PROFILE_BACKGROUND_KEYWORDS = PONY_V7_BACKGROUND_KEYWORDS + TAG_PROFILE_EXTRA_BACKGROUND_KEYWORDS
+
+PONY_V6_FOREGROUND_BLOCKLIST_FOR_BACKGROUND = {
+    "anthro",
+    "body",
+    "character",
+    "cool",
+    "corset",
+    "cybernetic",
+    "drift",
+    "dynamic",
+    "enjoying",
+    "explicit",
+    "feature",
+    "fine",
+    "furry",
+    "hand",
+    "latex",
+    "lend",
+    "nsfw",
+    "sexy",
+    "subject",
+    "velociraptor",
+}
+
+PONY_V6_STYLE_KEYWORDS = (
+    "composition",
+    "watercolor",
+    "cinematic",
+    "dynamic composition",
+    "lighting",
+    "perspective",
+    "shot",
+    "view",
 )
 
 
@@ -1509,13 +2307,11 @@ def _z_image_foreground_fallback(word_salad, style_anchor, value):
         f"The image centers on {subject}. The subject appears as a real visual presence with a readable pose, "
         "clear body language, visible clothing or surface texture, and small details that make the concept feel "
         "intentional. The action is easy to understand at a glance, with natural proportions, believable materials, "
-        "and a few distinctive features that guide the viewer's attention. The prompt should describe what the viewer "
-        "can actually see: the angle of the head or object, the placement of the hands or edges, the weight of the "
-        "body, the condition of fabric, metal, skin, fur, glass, dust, water, or other visible surfaces. Give the "
-        "foreground enough physical specificity that the subject could be painted without guessing the silhouette. "
-        "Include small but useful cues such as tension in the posture, direction of the gaze, contact with nearby "
-        "props, reflected highlights, worn seams, scratches, damp areas, loose strands, or other local details that "
-        "make the main figure or object feel present inside the scene."
+        "and a few distinctive features that guide the viewer's attention. The angle of the head or object, the "
+        "placement of the hands or edges, the weight of the body, and the condition of fabric, metal, skin, fur, "
+        "glass, dust, water, or other visible surfaces are clear in the foreground. Small cues such as tension in "
+        "the posture, direction of the gaze, contact with nearby props, reflected highlights, worn edges, scratches, "
+        "damp areas, loose strands, or other local details make the main figure or object feel present inside the scene."
     )
 
 
@@ -1529,10 +2325,10 @@ def _z_image_background_fallback(word_salad, style_anchor, value):
         f"The scene takes place in {background}. The environment supports the subject with a clear foreground, "
         "middle ground, and distant background, using recognizable surfaces, objects, architecture, terrain, or decor. "
         "Light sources and atmosphere are visible inside the scene, so the image feels grounded rather than empty. "
-        "Describe the space as if it were being framed for a finished image: floor or ground texture, wall or horizon "
-        "shape, nearby props, distant silhouettes, openings, furniture, signage, vegetation, machinery, weather, smoke, "
-        "mist, dust, or reflections where they fit the source idea. The background should not be a vague backdrop; it "
-        "should contain concrete objects at different distances, visible occlusion, scale changes, and a sense of air "
+        "The space includes floor or ground texture, wall or horizon shape, nearby props, distant silhouettes, "
+        "openings, furniture, signage, vegetation, machinery, weather, smoke, mist, dust, or reflections where they "
+        "fit the source idea. The background contains concrete objects at different distances, visible occlusion, "
+        "scale changes, and a sense of air "
         "between the subject and the farthest shapes. Mention how the environment affects the mood through color, "
         "temperature, shadow direction, and the kind of light falling across the scene."
     )
@@ -1542,13 +2338,12 @@ def _z_image_base_fallback(word_salad, style_anchor, value):
     terms = _z_image_terms(word_salad, style_anchor, value, limit=10)
     mood = _sentence_from_terms(terms[:4], "the core idea")
     return (
-        f"The image is written as a natural Z-Image scene description with detailed sentences rather than SDXL tag lists. "
-        f"The visual treatment frames {mood} with cinematic composition, atmospheric lighting, realistic shadows, and a coherent color mood. "
-        "The camera language can suggest an eye-level view, three-quarter composition, 85mm lens, shallow depth of field, "
-        "or wide-angle framing when it fits the scene. State the style as a coherent visual direction, such as "
-        "photographic realism, painterly fantasy illustration, polished anime-inspired rendering, or editorial concept "
-        "art. Include contrast, color palette, texture handling, and the relationship between sharp focal areas and "
-        "softer peripheral details."
+        f"The visual treatment frames {mood} with cinematic composition, atmospheric lighting, realistic shadows, "
+        "and a coherent color mood. The camera language suggests an eye-level view, three-quarter composition, "
+        "85mm lens, shallow depth of field, or wide-angle framing when it fits the scene. The style reads as a "
+        "coherent visual direction, such as photographic realism, painterly fantasy illustration, polished "
+        "anime-inspired rendering, or editorial concept art. Contrast, color palette, texture handling, and the "
+        "relationship between sharp focal areas and softer peripheral details are visible in the final image."
     )
 
 
@@ -1838,18 +2633,23 @@ def _target_profile_instructions(target_profile, style_cluster):
         return """Target profile: Pony v6.
 - base_prompt must be 10 to 20 words and contain Pony v6 score tags plus broad model/style anchors.
 - foreground_prompt must be about 36 to 40 words of concrete SDXL/Pony v6 subject, action, material, pose, expression, and focal-detail tags.
-- background_prompt must be about 36 to 40 words of concrete setting, prop, atmosphere, architecture, terrain, and depth tags.
+- background_prompt must be about 30 to 40 words of concrete visible background tags: places, rooms, furniture, windows, buildings, plants, terrain, distant objects, light sources, props, and decor.
+- If the source only names a setting, add fitting visible details. Example: forest can become dark_forest tall_trees mushrooms glowing_crystals mossy_ground roots misty_path.
+- Avoid abstract filler chains such as environmental_depth middle_ground visible_setting scene_context background_texture unless concrete visible objects are also present.
 - Use space-separated tags without commas in base_prompt, foreground_prompt, and background_prompt.
+- Write tag tokens only. Do not write sentences, articles, helper prose, labels, explanations, or grammar filler.
 - Include only concrete subject, action, material, setting, prop, composition, and a few useful quality tags.
-- Avoid filler words, prose sentences, random process words, generic style spam, and placeholders like simple_background."""
+- Avoid filler words, prose sentences, random process words, generic style spam, and purely abstract background filler."""
     if target_profile == "illustrious":
         return """Target profile: Illustrious.
 - base_prompt must be 10 to 20 words and contain compact IllustriousXL quality, style, artist/medium, and global aesthetic tags.
 - foreground_prompt must be about 36 to 40 words of concrete subject, action, outfit/material, pose, expression, and focal-detail tags.
-- background_prompt must be about 36 to 40 words of concrete setting, room, architecture, prop, decor, atmosphere, lighting, and depth tags.
+- background_prompt must be about 30 to 40 words of concrete visible background tags: places, rooms, furniture, windows, buildings, plants, terrain, distant objects, light sources, props, and decor.
+- If the source only names a setting, add fitting visible details. Example: living_room can become sofa window curtains table_lamp carpet shelves city_view.
+- Avoid abstract filler chains such as environmental_depth middle_ground visible_setting scene_context background_texture unless concrete visible objects are also present.
 - Use space-separated tags without commas in base_prompt, foreground_prompt, and background_prompt.
 - Do not copy the word salad literally.
-- Avoid process words, useless random objects, generic style spam, and placeholders like simple_background."""
+- Avoid process words, useless random objects, generic style spam, and purely abstract background filler."""
     if target_profile == "z_image":
         return """Target profile: Z-Image.
 - Write natural, detailed image-description prose, not SDXL/Danbooru tag lists.
@@ -1872,14 +2672,52 @@ def _target_profile_instructions(target_profile, style_cluster):
 - base_prompt + foreground_prompt + background_prompt should be about 220 to 300 words total."""
 
 
+def _candidate_few_shot_example(target_profile, word_salad, style_anchor):
+    target_profile = _normalize_target_profile(target_profile)
+    data = _candidate_data(target_profile, word_salad, style_anchor)
+    if not data:
+        return ""
+
+    fixed_base = data["fixed_base_tags"]
+    foreground = data["foreground_candidates"]
+    background = data["background_candidates"]
+    style = data["style_candidates"]
+
+    if target_profile == "pony_v6":
+        base = _candidate_tag_text([*fixed_base[:12], *style[:3], "anime_illustration", "sharp_focus"])
+        foreground_prompt = _candidate_tag_text([*foreground[:10], "readable_pose", "visible_silhouette", "material_texture"])
+        background_prompt = _candidate_tag_text(background[:24] or _minimal_background_tags())
+        return f"""Example field values for Pony v6 using the current candidates only:
+base_prompt => {base}
+foreground_prompt => {foreground_prompt}
+background_prompt => {background_prompt}
+negative => low quality worst quality bad anatomy bad hands malformed fingers extra fingers missing fingers text watermark logo blurry
+report => Built a Pony v6 split prompt from sorted foreground background and style candidates."""
+    if target_profile == "illustrious":
+        base = _candidate_tag_text([*fixed_base[:12], *style[:3], "anime_illustration", "soft_shading"])
+        foreground_prompt = _candidate_tag_text([*foreground[:10], "readable_pose", "clear_subject", "material_texture"])
+        background_prompt = _candidate_tag_text(background[:24] or _minimal_background_tags())
+        return f"""Example field values for Illustrious using the current candidates only:
+base_prompt => {base}
+foreground_prompt => {foreground_prompt}
+background_prompt => {background_prompt}
+negative => low quality worst quality bad anatomy bad hands malformed fingers poorly drawn face text watermark logo blurry
+report => Built an Illustrious split prompt from sorted visual candidates."""
+    return ""
+
+
 def _build_generation_prompt(target_profile, word_salad, style_anchor, style_cluster):
     target_profile = _normalize_target_profile(target_profile)
-    salad_terms = _curated_terms(word_salad)
     anchor = str(style_anchor).strip()
     anchor_block = anchor if anchor else "(none)"
+    candidate_context = _build_candidate_context(target_profile, word_salad, style_anchor)
+    example = _candidate_few_shot_example(target_profile, word_salad, style_anchor)
+    candidate_block = f"\n{candidate_context}\n" if candidate_context else ""
+    example_block = f"\n{example}\n" if example else ""
     return f"""Rewrite this random word salad into one model-specific image prompt set.
 
 {_target_profile_instructions(target_profile, style_cluster)}
+{example_block}{candidate_block}
 
 Random word salad:
 {str(word_salad).strip()}
@@ -1914,9 +2752,14 @@ def _build_minimal_retry_prompt(target_profile, word_salad, style_anchor, style_
     if not terms:
         terms = "anime subject, clean composition, detailed lighting"
     target_profile = _normalize_target_profile(target_profile)
+    candidate_context = _build_candidate_context(target_profile, word_salad, style_anchor)
+    example = _candidate_few_shot_example(target_profile, word_salad, style_anchor)
+    candidate_block = f"\n{candidate_context}" if candidate_context else ""
+    example_block = f"\n{example}" if example else ""
     return f"""Return one JSON object only. No markdown. No prose.
 Use exactly these keys: {", ".join(RESPONSE_KEYS)}
 {_target_profile_instructions(target_profile, style_cluster)}
+{example_block}{candidate_block}
 Source visual terms: {terms}
 Rules: base_prompt contains global model/style or natural style guidance; foreground_prompt describes the main subject; background_prompt describes the visible setting; negative lists quality/anatomy/artifact problems to avoid unless the target profile says it is unused; report is one short sentence."""
 
@@ -1924,6 +2767,8 @@ Rules: base_prompt contains global model/style or natural style guidance; foregr
 class NukunOllamaPromptRefiner:
     @classmethod
     def INPUT_TYPES(cls):
+        available_models = _available_ollama_models()
+        default_model = DEFAULT_OLLAMA_MODEL if DEFAULT_OLLAMA_MODEL in available_models else available_models[0]
         return {
             "required": {
                 "word_salad": (
@@ -1945,10 +2790,10 @@ class NukunOllamaPromptRefiner:
                     },
                 ),
                 "ollama_model": (
-                    _available_ollama_models(),
+                    available_models,
                     {
-                        "default": DEFAULT_OLLAMA_MODEL,
-                        "tooltip": "Local Ollama model used to rewrite the prompt. Start Ollama before ComfyUI to refresh this list.",
+                        "default": default_model,
+                        "tooltip": "Local Ollama model used to rewrite the prompt. The dropdown refreshes from the selected Ollama URL in the browser.",
                     },
                 ),
                 "target_profile": (
@@ -2007,12 +2852,9 @@ class NukunOllamaPromptRefiner:
                     },
                 ),
                 "context_length": (
-                    "INT",
+                    OLLAMA_CONTEXT_LENGTH_CHOICES,
                     {
-                        "default": DEFAULT_OLLAMA_CONTEXT_LENGTH,
-                        "min": 512,
-                        "max": 262144,
-                        "step": 512,
+                        "default": str(DEFAULT_OLLAMA_CONTEXT_LENGTH),
                         "tooltip": "Ollama num_ctx context window. Higher values need more VRAM/RAM and may be limited by the selected model.",
                     },
                 ),
