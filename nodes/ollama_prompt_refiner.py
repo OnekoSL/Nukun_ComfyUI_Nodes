@@ -23,7 +23,7 @@ Z_IMAGE_POSITIVE_WORD_RANGE = (360, 440)
 Z_IMAGE_FOREGROUND_MIN_WORDS = 130
 Z_IMAGE_BACKGROUND_MIN_WORDS = 130
 Z_IMAGE_BASE_MIN_WORDS = 80
-TARGET_PROFILES = ("pony_v6", "illustrious", "pony_v7", "z_image")
+TARGET_PROFILES = ("pony_v6", "illustrious", "pony_v7", "z_image", "anima")
 DEFAULT_TARGET_PROFILE = "pony_v7"
 
 OUTPUT_KEYS = (
@@ -112,6 +112,24 @@ NEGATIVE_BASELINES = {
         "compression artifacts",
     ),
     "z_image": (),
+    "anima": (
+        "worst quality",
+        "low quality",
+        "score_1",
+        "score_2",
+        "score_3",
+        "artist name",
+        "bad anatomy",
+        "bad hands",
+        "malformed fingers",
+        "extra fingers",
+        "missing fingers",
+        "text",
+        "watermark",
+        "logo",
+        "blurry",
+        "jpeg artifacts",
+    ),
 }
 
 NEGATIVE_MARKERS = (
@@ -390,10 +408,12 @@ Rules:
 - Never explain outside JSON.
 - Keep all image prompts in English.
 - Split the positive prompt into global model/style material, foreground subject detail, and background setting detail. For Z-Image, write natural descriptive prose instead of tags.
+- For Anima, write a concise tag/caption hybrid: lowercase Gelbooru/Danbooru-style tags with spaces instead of underscores, except score tags such as score_9, score_8_up, and score_7_up.
 - Pony v6 and Pony v7 are model names, not subjects. Do not add a pony, horse, or equine character unless the input explicitly asks for one.
 - Do not invent copyrighted character names unless they appear in the input or style anchor.
 - If the input implies adult content, keep wording as neutral image-generation tags and do not add explicit acts.
 - Negative prompts: conservative model-appropriate quality/anatomy/artifact negatives, text/watermark/logo, duplicates, distorted hands, messy composition. For Z-Image, leave negative empty.
+- For Anima, use safety/content tags only when safe, sensitive, nsfw, explicit, or guro appear in the source text or style anchor; do not add a default safety tag.
 - Report: one short sentence naming the retained core idea and what was discarded."""
 
 
@@ -737,9 +757,122 @@ def _with_negative_baseline(target_profile, value):
 
 
 def _strip_commas_for_profile(target_profile, value):
-    if _normalize_target_profile(target_profile) in ("pony_v7", "z_image"):
+    if _normalize_target_profile(target_profile) in ("pony_v7", "z_image", "anima"):
         return value
     return re.sub(r"\s+", " ", str(value).replace(",", " ")).strip()
+
+
+ANIMA_SAFETY_TAGS = ("safe", "sensitive", "nsfw", "explicit", "guro")
+ANIMA_QUALITY_TAGS = ("masterpiece", "best quality", "score_9", "score_8_up", "score_7_up")
+ANIMA_BASE_STYLE_TAGS = ("anime illustration", "digital art", "clean linework")
+
+
+def _anima_safety_tags(*values):
+    source = " ".join(str(value) for value in values)
+    normalized = re.sub(r"[_-]+", " ", source.lower())
+    found = []
+    for tag in ANIMA_SAFETY_TAGS:
+        if re.search(rf"\b{re.escape(tag)}\b", normalized):
+            found.append(tag)
+    return found
+
+
+def _normalize_anima_tag(value):
+    tag = str(value).strip().lower()
+    tag = re.sub(
+        r"(?i)^\s*(?:base_prompt|foreground_prompt|background_prompt|positive|negative|report|subject(?:\s+and\s+action)?|environment(?:\s+and\s+light)?)\s*[:=-]\s*",
+        "",
+        tag,
+    )
+    tag = tag.strip(" .:;()[]{}\"'")
+    tag = re.sub(r"\s+", " ", tag)
+    tag = re.sub(r"[^a-z0-9_ @.+:-]+", " ", tag)
+    tag = re.sub(r"\s+", " ", tag).strip(" .:;")
+    compact = tag.replace(" ", "_")
+    if not compact or compact in GENERATED_TAG_NOISE or compact.startswith("style_cluster_"):
+        return ""
+    if _is_model_meta_term(compact) or re.fullmatch(r"rating_[a-z0-9_]+", compact):
+        return ""
+    if compact.startswith("source_"):
+        compact = compact.removeprefix("source_")
+        tag = compact
+    if re.fullmatch(r"score_\d+(?:_up)?", compact):
+        return compact
+    tag = tag.replace("_", " ")
+    tag = re.sub(r"\s+", " ", tag).strip()
+    if not tag or tag in STOPWORDS:
+        return ""
+    if _is_low_value_prompt_term(tag.replace(" ", "_")) and tag.replace(" ", "_") not in {
+        "masterpiece",
+        "best_quality",
+        "anime_illustration",
+        "digital_art",
+    }:
+        return ""
+    return tag
+
+
+def _anima_tag_text(values, limit=32, fallback=""):
+    if isinstance(values, str):
+        raw_items = re.split(r"[,;|\n]+", values)
+        if len(raw_items) == 1:
+            raw_items = re.split(r"\s{2,}|\t+", values)
+    else:
+        raw_items = list(values or ())
+
+    tags = []
+    seen = set()
+    for raw in raw_items:
+        if isinstance(raw, (list, tuple, set)):
+            nested = _anima_tag_text(raw, limit=limit, fallback="")
+            candidates = nested.split(",") if nested else []
+        else:
+            candidates = [raw]
+        for candidate in candidates:
+            tag = _normalize_anima_tag(candidate)
+            key = tag.replace(" ", "_")
+            if not tag or key in seen:
+                continue
+            seen.add(key)
+            tags.append(tag)
+            if len(tags) >= limit:
+                return ", ".join(tags)
+    return ", ".join(tags) if tags else fallback
+
+
+def _anima_tags(values, limit=32):
+    text = _anima_tag_text(values, limit=limit, fallback="")
+    return [tag.strip() for tag in text.split(",") if tag.strip()]
+
+
+def _anima_anchor_style_tags(style_anchor, limit=10):
+    tags = []
+    for raw_tag in re.split(r"[,;|\n]+", str(style_anchor).strip()):
+        cleaned = str(raw_tag)
+        for safety_tag in ANIMA_SAFETY_TAGS:
+            cleaned = re.sub(rf"\b{re.escape(safety_tag)}\b", " ", cleaned, flags=re.IGNORECASE)
+        normalized = _normalize_anima_tag(cleaned)
+        if not normalized or normalized in ANIMA_SAFETY_TAGS:
+            continue
+        if _term_is_background_like(normalized):
+            continue
+        tags.append(normalized)
+    if not tags:
+        for tag in _tokenize_prompt_tags(style_anchor, limit=limit * 3, filter_generated_noise=True):
+            normalized = _normalize_anima_tag(tag)
+            if normalized and normalized not in ANIMA_SAFETY_TAGS and not _term_is_background_like(normalized):
+                tags.append(normalized)
+    return _anima_tags(tags, limit=limit)
+
+
+def _anima_sentence_from_tags(tags, fallback, prefix):
+    cleaned = _anima_tags(tags, limit=18)
+    if not cleaned:
+        cleaned = _anima_tags(fallback, limit=18)
+    if not cleaned:
+        return ""
+    phrase = ", ".join(cleaned[:10])
+    return f"{prefix} {phrase}."
 
 
 def _clean_report(report, target_profile, word_salad, style_anchor):
@@ -755,6 +888,7 @@ def _clean_report(report, target_profile, word_salad, style_anchor):
         "illustrious": "Illustrious",
         "pony_v7": "Pony v7",
         "z_image": "Z-Image",
+        "anima": "Anima",
     }.get(_normalize_target_profile(target_profile), "selected profile")
     return f"Built one {profile_label} prompt from {core} and removed weak filler terms"
 
@@ -808,6 +942,19 @@ def _postprocess_result(values, target_profile, word_salad, style_anchor, style_
         }
         base_prompt, foreground_prompt, background_prompt = _light_tag_prompt_parts(
             target_profile,
+            word_salad,
+            style_anchor,
+            provided if any(provided.values()) else None,
+        )
+        positive = _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt)
+    elif target_profile == "anima":
+        provided = {
+            "base_prompt": base_prompt,
+            "foreground_prompt": foreground_prompt,
+            "background_prompt": background_prompt,
+        }
+        base_prompt, foreground_prompt, background_prompt = _anima_prompt_parts(
+            positive,
             word_salad,
             style_anchor,
             provided if any(provided.values()) else None,
@@ -1066,7 +1213,7 @@ def _style_tags_from_terms(terms, limit=18):
 
 def _candidate_data(target_profile, word_salad, style_anchor):
     target_profile = _normalize_target_profile(target_profile)
-    if target_profile not in ("pony_v6", "illustrious"):
+    if target_profile not in ("pony_v6", "illustrious", "anima"):
         return {}
 
     source_terms = _curated_terms(word_salad, limit=48, filter_low_value=False)
@@ -1078,9 +1225,15 @@ def _candidate_data(target_profile, word_salad, style_anchor):
         fixed_base_tags.extend(("anime_illustration", "sharp_focus", "clean_linework", "best_quality"))
         foreground_tags = _pony_v6_foreground_tags_from_terms(source_terms, limit=36)
     else:
-        fixed_base_tags = list(ILLUSTRIOUS_BASE_TAGS)
-        fixed_base_tags.extend(anchor_tags)
-        fixed_base_tags.extend(("amazing_quality", "very_aesthetic", "polished_illustration", "soft_shading", "sharp_linework"))
+        if target_profile == "anima":
+            fixed_base_tags = ("masterpiece", "best_quality", "score_9", "score_8_up", "score_7_up", *_anima_safety_tags(word_salad, style_anchor))
+            fixed_base_tags = list(fixed_base_tags)
+            fixed_base_tags.extend(anchor_tags)
+            fixed_base_tags.extend(("anime_illustration", "digital_art", "clean_linework"))
+        else:
+            fixed_base_tags = list(ILLUSTRIOUS_BASE_TAGS)
+            fixed_base_tags.extend(anchor_tags)
+            fixed_base_tags.extend(("amazing_quality", "very_aesthetic", "polished_illustration", "soft_shading", "sharp_linework"))
         foreground_tags = _generic_foreground_tags_from_terms(source_terms, limit=36)
 
     background_tags = _pony_v6_background_tags_from_terms(source_terms, limit=30)
@@ -1113,7 +1266,7 @@ Use the candidate lists as the main source of truth.
 You may add a few fitting visual tags when they clarify the image.
 Do not move foreground candidates into background_prompt.
 Do not move background candidates into foreground_prompt.
-For Pony v6 and Illustrious, write background_prompt as 30 to 40 words of concrete visible background things.
+For Pony v6, Illustrious, and Anima, write background_prompt as concrete visible background things.
 If background_candidates name a setting, expand that setting with matching visible objects from that same kind of place.
 Do not borrow objects from unrelated example settings.
 Do not copy candidate-list names, empty markers, or instruction words into any output value.
@@ -1682,6 +1835,84 @@ def _light_tag_prompt_parts(target_profile, word_salad, style_anchor, provided=N
     )
     background_tags = _extend_concrete_background_tags(background_tags, candidate_data)
     background_prompt = _split_tags_text(background_tags)
+
+    return base_prompt, foreground_prompt, background_prompt
+
+
+def _anima_prompt_parts(value, word_salad, style_anchor, provided=None):
+    provided = provided or {}
+    combined_source = " ".join(
+        str(part)
+        for part in (
+            word_salad,
+            value,
+            provided.get("foreground_prompt", ""),
+            provided.get("background_prompt", ""),
+        )
+        if str(part).strip()
+    )
+    foreground_terms, background_terms, style_terms, all_terms = _split_pony_v7_terms(
+        combined_source,
+        style_anchor,
+        value,
+    )
+    source_terms = _curated_terms(combined_source, limit=48, filter_low_value=False)
+    safety_tags = _anima_safety_tags(word_salad, style_anchor)
+
+    base_tags = list(ANIMA_QUALITY_TAGS)
+    base_tags.extend(safety_tags)
+    base_tags.extend(_anima_anchor_style_tags(style_anchor, limit=8))
+    base_tags.extend(_tags_from_terms(style_terms[:8], limit=8))
+    base_tags.extend(ANIMA_BASE_STYLE_TAGS)
+    provided_base = _anima_tag_text(provided.get("base_prompt", ""), limit=12)
+    if provided_base:
+        base_tags.extend(provided_base.split(", "))
+    base_prompt = _anima_tag_text(
+        base_tags,
+        limit=18,
+        fallback="masterpiece, best quality, score_9, score_8_up, score_7_up, anime illustration, clean linework",
+    )
+
+    provided_foreground = _anima_tags(provided.get("foreground_prompt", ""), limit=18)
+    if provided_foreground and _word_count(", ".join(provided_foreground)) >= 3:
+        foreground_tags = provided_foreground
+    else:
+        foreground_tags = _generic_foreground_tags_from_terms(foreground_terms or source_terms, limit=28)
+        foreground_tags.extend(_expand_tags_from_terms(source_terms, FOREGROUND_EXPANSIONS))
+    foreground_tags = [
+        tag
+        for tag in _anima_tags(foreground_tags, limit=18)
+        if tag not in ANIMA_QUALITY_TAGS and tag not in safety_tags and not _term_is_background_like(tag)
+    ]
+    foreground_prompt = _anima_sentence_from_tags(
+        foreground_tags,
+        "clear subject, readable pose, focused expression, material texture",
+        "Subject and action:",
+    )
+
+    provided_background = _anima_tags(provided.get("background_prompt", ""), limit=18)
+    if (
+        provided_background
+        and _word_count(", ".join(provided_background)) >= 3
+        and not _has_generic_background_prompt(", ".join(provided_background))
+    ):
+        background_tags = provided_background
+    else:
+        background_tags = _pony_v6_background_tags_from_terms(background_terms or source_terms, limit=24)
+        background_tags.extend(_tag_profile_background_preset_tags(background_terms or source_terms))
+        background_tags.extend(_expand_tags_from_terms(source_terms, BACKGROUND_EXPANSIONS))
+        if not background_tags:
+            background_tags = _minimal_background_tags()
+    background_tags = [
+        tag
+        for tag in _anima_tags(background_tags, limit=18)
+        if tag not in ANIMA_QUALITY_TAGS and tag not in safety_tags
+    ]
+    background_prompt = _anima_sentence_from_tags(
+        background_tags,
+        "visible setting, ambient lighting, background props, spatial depth",
+        "Environment and light:",
+    )
 
     return base_prompt, foreground_prompt, background_prompt
 
@@ -2455,6 +2686,9 @@ def _join_positive_parts(target_profile, base_prompt, foreground_prompt, backgro
     if profile == "z_image":
         parts = [foreground_prompt, background_prompt, base_prompt]
         return "\n\n".join(str(part).strip() for part in parts if str(part).strip())
+    if profile == "anima":
+        parts = [str(part).strip().strip(",") for part in (base_prompt, foreground_prompt, background_prompt) if str(part).strip()]
+        return "\n".join(parts)
     if profile == "pony_v7":
         base_sections = [part.strip() for part in re.split(r"\n\s*\n+", str(base_prompt).strip()) if part.strip()]
         header = ""
@@ -2595,6 +2829,14 @@ def _profile_positive_fallback(target_profile, word_salad, style_anchor, style_c
         return f"score_9, score_8_up, score_7_up, {anchor_prefix}{core_terms}"
     if target_profile == "illustrious":
         return f"masterpiece, best_quality, {anchor_prefix}{core_terms}"
+    if target_profile == "anima":
+        base_prompt, foreground_prompt, background_prompt = _anima_prompt_parts(
+            "",
+            word_salad,
+            style_anchor,
+            None,
+        )
+        return _join_positive_parts("anima", base_prompt, foreground_prompt, background_prompt)
     if target_profile == "z_image":
         base_prompt, foreground_prompt, background_prompt = _z_image_prompt_parts(
             "",
@@ -2650,6 +2892,19 @@ def _target_profile_instructions(target_profile, style_cluster):
 - Use space-separated tags without commas in base_prompt, foreground_prompt, and background_prompt.
 - Do not copy the word salad literally.
 - Avoid process words, useless random objects, generic style spam, and purely abstract background filler."""
+    if target_profile == "anima":
+        return """Target profile: Anima.
+- Anima is an anime, illustration, and artistic image model. It is not a realism profile.
+- Write a concise tag/caption hybrid: one compact tag block plus exactly two short descriptive sentences.
+- base_prompt must start with or contain: masterpiece, best quality, score_9, score_8_up, score_7_up.
+- base_prompt should be one comma-separated block with quality, safety, medium, lighting/style, and composition tags only.
+- Only include safe, sensitive, nsfw, explicit, or guro when one of those safety/content tags appears in the source text or style anchor. Do not add a default safety tag.
+- Use spaces instead of underscores in tags, except score tags such as score_9, score_8_up, score_7_up, score_6, score_1.
+- foreground_prompt must be one sentence describing subject, appearance, pose, action, expression, materials, and focal props.
+- background_prompt must be one sentence describing environment, visible props, light sources, atmosphere, depth, and style finish.
+- Keep the full positive prompt compact: base tag block plus those two sentences, not a 75-token cage and not a long wish list.
+- Do not use Pony v7 controls such as rating_explicit, style_cluster_*, source_* tags, or a rating/style_cluster header.
+- negative should include Anima-appropriate quality/anatomy/artifact negatives and must not repeat the positive prompt."""
     if target_profile == "z_image":
         return """Target profile: Z-Image.
 - Write natural, detailed image-description prose, not SDXL/Danbooru tag lists.
@@ -2703,6 +2958,24 @@ foreground_prompt => {foreground_prompt}
 background_prompt => {background_prompt}
 negative => low quality worst quality bad anatomy bad hands malformed fingers poorly drawn face text watermark logo blurry
 report => Built an Illustrious split prompt from sorted visual candidates."""
+    if target_profile == "anima":
+        base = _anima_tag_text([*fixed_base[:12], *style[:3], "anime_illustration", "digital_art"])
+        foreground_prompt = _anima_sentence_from_tags(
+            [*foreground[:12], "readable_pose", "clear_subject", "material_texture"],
+            "clear subject, readable pose, focused expression, material texture",
+            "Subject and action:",
+        )
+        background_prompt = _anima_sentence_from_tags(
+            background[:24] or _minimal_background_tags(),
+            "visible setting, ambient lighting, background props, spatial depth",
+            "Environment and light:",
+        )
+        return f"""Example field values for Anima using the current candidates only:
+base_prompt => {base}
+foreground_prompt => {foreground_prompt}
+background_prompt => {background_prompt}
+negative => worst quality, low quality, score_1, score_2, score_3, artist name, bad anatomy, bad hands, text, watermark, blurry
+report => Built an Anima tag-hybrid split prompt from sorted visual candidates."""
     return ""
 
 
@@ -2729,6 +3002,7 @@ Important:
 - Fill every JSON field with a useful non-empty string, except Z-Image negative which should be empty.
 - Negative fields must describe things to avoid, not repeat the positive prompt. For Z-Image only, negative must be an empty string.
 - Do not treat Pony v6 or Pony v7 as animal subjects.
+- For Anima, do not use Pony v7/SDXL/Z-Image control language such as style_cluster_*, rating_explicit, source_* tags, or long Z-Image prose.
 - Start your response with {{ and end it with }}.
 - Use exactly the requested JSON keys, with no markdown and no commentary.
 - Required JSON keys: {", ".join(RESPONSE_KEYS)}.

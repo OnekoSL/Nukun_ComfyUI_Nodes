@@ -100,6 +100,20 @@ class NukunT5SculptEqualLengthBalancer:
                 return key
         return None
 
+    def _detect_sculptable_text_stream_key(self, clip, *token_sets):
+        available = set()
+        for tokens in token_sets:
+            if isinstance(tokens, dict):
+                available.update(tokens.keys())
+
+        candidates = [key for key in SUPPORTED_TEXT_STREAM_KEYS if key in available]
+        for key in candidates:
+            submodel = getattr(clip.cond_stage_model, key, None)
+            transformer = getattr(submodel, "transformer", None)
+            if transformer is not None and hasattr(transformer, "get_input_embeddings"):
+                return key
+        return candidates[0] if candidates else None
+
     def _available_token_keys(self, *token_sets):
         available = set()
         for tokens in token_sets:
@@ -321,7 +335,7 @@ class NukunT5SculptEqualLengthBalancer:
         raw_positive_tokens = measure.tokenize(positive)
         raw_negative_tokens = measure.tokenize(negative)
 
-        stream_key = self._detect_text_stream_key(raw_positive_tokens, raw_negative_tokens)
+        stream_key = self._detect_sculptable_text_stream_key(measure, raw_positive_tokens, raw_negative_tokens)
         if stream_key is None:
             expected = ", ".join(SUPPORTED_TEXT_STREAM_KEYS)
             available = self._available_token_keys(raw_positive_tokens, raw_negative_tokens)

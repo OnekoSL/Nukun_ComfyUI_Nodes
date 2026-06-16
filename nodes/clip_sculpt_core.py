@@ -28,14 +28,21 @@ def maximum_absolute_values(tensors, reversed=False):
 
 
 def get_clip_submodel(clip, stream_key):
-    submodel = getattr(clip.cond_stage_model, f"clip_{stream_key}", None)
+    candidates = (f"clip_{stream_key}", stream_key)
+    submodel = None
+    matched_name = None
+    for candidate in candidates:
+        submodel = getattr(clip.cond_stage_model, candidate, None)
+        if submodel is not None:
+            matched_name = candidate
+            break
     if submodel is None:
         raise RuntimeError(
             f"ERROR: CLIP stream '{stream_key}' is not supported by this node. "
-            f"Expected cond_stage_model.clip_{stream_key}."
+            f"Expected one of: {', '.join('cond_stage_model.' + name for name in candidates)}."
         )
     if not hasattr(submodel, "transformer"):
-        raise RuntimeError(f"ERROR: CLIP stream '{stream_key}' has no transformer.")
+        raise RuntimeError(f"ERROR: CLIP stream '{stream_key}' on cond_stage_model.{matched_name} has no transformer.")
     embedding = get_input_embedding(submodel, stream_key)
     if not hasattr(embedding, "weight"):
         raise RuntimeError(
@@ -43,6 +50,13 @@ def get_clip_submodel(clip, stream_key):
             "This node is for SD1/SDXL CLIP-style encoders, not T5."
         )
     return submodel
+
+
+def maybe_get_clip_submodel(clip, stream_key):
+    try:
+        return get_clip_submodel(clip, stream_key), None
+    except RuntimeError as error:
+        return None, str(error)
 
 
 def get_input_embedding(submodel, stream_key):
@@ -201,8 +215,6 @@ def sculpt_clip_tokens(clip, text, intensity, method, normalization, top_k):
     stream_reports = []
 
     if float(intensity) <= 0 and normalization == "none":
-        for stream_key in tokens:
-            get_clip_submodel(clip, stream_key)
         return tokens, {
             "eligible": 0,
             "sculpted": 0,
@@ -212,7 +224,10 @@ def sculpt_clip_tokens(clip, text, intensity, method, normalization, top_k):
         }
 
     for stream_key in tokens:
-        submodel = get_clip_submodel(clip, stream_key)
+        submodel, skip_reason = maybe_get_clip_submodel(clip, stream_key)
+        if submodel is None:
+            stream_reports.append(f"{stream_key}: skipped unsupported")
+            continue
         special_ids = special_token_ids(submodel)
         coords = eligible_entries(tokens, stream_key, special_ids)
         total_eligible += len(coords)
