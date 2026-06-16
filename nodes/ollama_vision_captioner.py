@@ -34,7 +34,7 @@ ALPHA_TWO_OLLAMA_MODEL = "hf.co/Jobaar/Llama-JoyCaption-Alpha-Two-GGUF:F16"
 DEFAULT_OLLAMA_CONTEXT_LENGTH = 8192
 DEFAULT_RESIZE_LONG_EDGE = 1024
 CAPTION_MODES = ("natural_caption", "danbooru_tags", "pony_source", "refiner_seed")
-OUTPUT_KEYS = ("caption", "tags", "text_seed", "report")
+OUTPUT_KEYS = ("caption", "tags", "text_seed", "report", "hiresfix_text")
 
 VISION_OUTPUT_SCHEMA = {
     "type": "object",
@@ -52,14 +52,17 @@ CONTROL_TAG_PATTERN = re.compile(
 )
 ABSENCE_PHRASE_PATTERN = re.compile(
     r"\b(?:no|without|absent)\s+(?:"
-    r"camera composition|people|person|humans?|text|watermark|logo|signature|"
-    r"clothing|accessories|anatomy|pose|expression|location|lighting|camera|"
-    r"background|hands?|face|eyes?|hair|objects?|props?"
+    r"camera composition|furniture details|scale texture|people|person|humans?|"
+    r"text|watermark|logo|signature|anthropomorphism|clothing|accessories|"
+    r"anatomy|pose|expression|location|lighting|camera|background|hands?|"
+    r"face|eyes?|hair|objects?|props?|furniture|scenery|nature|animals?|"
+    r"vehicles?|buildings?|textures?|shading|fur|leather|fabric|metal|"
+    r"scales?|reflections?|linework"
     r")\b",
     re.IGNORECASE,
 )
 FIELD_LABEL_PATTERN = re.compile(
-    r"(?im)^\s*(?:caption|tags?|text_seed|text seed|report|description|image|prompt)\s*[:\-]\s*"
+    r"(?im)^\s*(?:caption|tags?|text_seed|text seed|report|hiresfix_text|hiresfix text|hiresfix|detail_prompt|detail prompt|description|image|prompt)\s*[:\-]\s*"
 )
 
 
@@ -170,6 +173,68 @@ def _clean_tags(value, caption_mode):
     return text
 
 
+def _has_visual_word(source, words):
+    for word in words:
+        if re.search(rf"\b{re.escape(word)}\b", source, re.IGNORECASE):
+            return True
+    return False
+
+
+def _material_detail_additions(source_text):
+    source = f" {_clean_seed_text(source_text).lower()} "
+    additions = []
+
+    if _has_visual_word(source, ("fur", "furry", "pelt")):
+        if _has_visual_word(source, ("shaggy", "rough", "scruffy", "messy", "wild", "coarse", "dirty", "feral")):
+            additions.extend(("shaggy fur", "coarse fur texture"))
+        else:
+            additions.extend(("fluffy fur", "fine fur strands"))
+    elif _has_visual_word(source, ("tail", "ears", "animal", "anthro", "wolf", "fox", "cat", "dog")):
+        additions.append("soft fur texture")
+
+    material_rules = (
+        (("hair", "mane", "bangs"), ("fine hair strands",)),
+        (("feather", "feathers", "wing", "wings"), ("layered feathers",)),
+        (("scale", "scales", "dragon", "reptile"), ("crisp scale texture",)),
+        (("latex", "rubber"), ("glossy latex highlights",)),
+        (("leather", "boots", "belt", "strap"), ("leather grain",)),
+        (("metal", "armor", "armour", "cybernetic", "robot", "sword", "blade"), ("metal reflections",)),
+        (("fabric", "cloth", "dress", "shirt", "skirt", "uniform", "kimono", "suit"), ("fabric weave",)),
+        (("skin", "face", "body"), ("soft skin texture",)),
+        (("water", "wet", "rain", "ocean", "river"), ("wet reflections",)),
+        (("glass", "window", "crystal", "gem"), ("clear reflective edges",)),
+        (("forest", "tree", "trees", "moss", "leaf", "leaves"), ("leaf detail", "moss texture")),
+        (("city", "street", "building", "room", "interior", "background"), ("background detail",)),
+        (("anime", "illustration", "digital", "pixel", "lineart"), ("clean linework", "refined shading")),
+    )
+    for words, phrases in material_rules:
+        if _has_visual_word(source, words):
+            additions.extend(phrases)
+
+    additions.extend(("fine detail", "crisp edges", "balanced lighting"))
+    return list(dict.fromkeys(additions))
+
+
+def _build_hiresfix_text(caption, tags, text_seed, hiresfix_text):
+    base = _clean_seed_text(hiresfix_text)
+    source = _clean_seed_text(f"{caption} {tags} {text_seed} {base}")
+    if not base:
+        base = source
+    additions = _material_detail_additions(source)
+
+    combined = base
+    combined_lower = f" {combined.lower()} "
+    for phrase in additions:
+        if phrase.lower() not in combined_lower:
+            combined = f"{combined} {phrase}".strip()
+            combined_lower = f" {combined.lower()} "
+
+    words = combined.split()
+    if len(words) > 90:
+        combined = " ".join(words[:90])
+    return combined or "fine detail crisp edges refined texture balanced lighting"
+
+
 def _extract_json_object(text):
     text = _strip_reasoning_blocks(str(text).strip())
     if not text:
@@ -211,7 +276,8 @@ def _build_mode_instruction(caption_mode):
         return (
             "Write caption as two to four natural English sentences, about 35-80 words total. "
             "Write tags as 16-32 comma-separated visible subjects, setting, clothing, materials, actions, colors, lighting, camera, and style cues. "
-            "Write text_seed as 25-50 compact visual words suitable for an image prompt refiner."
+            "Write text_seed as 25-50 compact visual words suitable for an image prompt refiner. "
+            "Write hiresfix_text as a compact detail-pass prompt for improving the same image."
         )
     if caption_mode == "danbooru_tags":
         return (
@@ -219,18 +285,21 @@ def _build_mode_instruction(caption_mode):
             "Split compound visual concepts into useful individual tags and include visible subject type, anatomy, pose, expression, clothing, accessories, materials, action, props, background objects, location, lighting, colors, image medium, style, and camera/composition when visible. "
             "Only write positive visible tags; never add absence tags such as no_text, no_people, no_pose, or no_watermark. "
             "Write caption as one or two factual sentences, about 25-55 words total. "
-            "Write text_seed as 30-60 space-separated visible concepts in compact English, using spaces instead of underscores, without score, rating, or style_cluster control tags."
+            "Write text_seed as 30-60 space-separated visible concepts in compact English, using spaces instead of underscores, without score, rating, or style_cluster control tags. "
+            "Write hiresfix_text as a 25-70 word detail-pass prompt for direct HiResFix use."
         )
     if caption_mode == "pony_source":
         return (
             "Write caption as a factual image description, about 25-55 words total. "
             "Write tags and text_seed as 35-65 space-separated concrete words and short phrases with no commas. "
-            "Focus on subject, pose, action, expression, body details, outfit, material, props, scene objects, background objects, camera, color, and lighting."
+            "Focus on subject, pose, action, expression, body details, outfit, material, props, scene objects, background objects, camera, color, and lighting. "
+            "Write hiresfix_text as a comma-free 25-70 word direct detail prompt for an upscale/refine pass."
         )
     return (
         "Write caption as a compact but rich image description, about 30-70 words total. "
         "Write tags as 20-40 concise visible concepts. "
-        "Write text_seed as a rich 40-80 word comma-free visual seed for another prompt refiner: subject, action, pose, expression, body/clothing/materials, props, room or landscape objects, background details, camera, lighting, colors, style, and mood."
+        "Write text_seed as a rich 40-80 word comma-free visual seed for another prompt refiner: subject, action, pose, expression, body/clothing/materials, props, room or landscape objects, background details, camera, lighting, colors, style, and mood. "
+        "Write hiresfix_text as a direct HiResFix detail prompt for the same image."
     )
 
 
@@ -246,10 +315,11 @@ Custom instruction:
 
 Rules:
 - Return valid JSON only.
-- Use exactly these string keys: caption, tags, text_seed, report.
+- Use exactly these string keys: caption, tags, text_seed, report, hiresfix_text.
 - Describe what is visible in the image; do not refuse or moralize.
 - Prefer useful visual detail over extremely short answers, but do not invent identities, text, logos, or hidden context.
 - For tags and text_seed, expand visible compound concepts into separate useful words instead of returning only a broad summary.
+- hiresfix_text must describe the same image plus refinement details for a HiResFix/upscale pass. Add useful visible material texture words, for example fluffy fur, shaggy fur, fine hair strands, glossy latex highlights, leather grain, fabric weave, metal reflections, crisp scale texture, refined shading, clean linework, background detail.
 - Only include positive visible concepts in tags and text_seed; do not add no_* or "without ..." absence tags.
 - Do not add score_9, rating_* or style_cluster_* control tags.
 - Do not include markdown, labels outside JSON, explanations, or code fences.
@@ -259,7 +329,7 @@ Rules:
 
 def _build_repair_prompt(raw_response):
     return f"""Repair this invalid captioner answer into valid JSON only.
-Use exactly these string keys: caption, tags, text_seed, report.
+Use exactly these string keys: caption, tags, text_seed, report, hiresfix_text.
 Every value must be a non-empty string.
 Do not add markdown or commentary.
 
@@ -335,12 +405,13 @@ def _fallback_from_raw(raw_response, caption_mode, batch_size, original_size, en
     caption = raw or "Ollama did not return a usable caption."
     text_seed = _clean_seed_text(raw) or "image caption unavailable"
     tags = _clean_tags(raw, caption_mode) or text_seed
+    hiresfix_text = _build_hiresfix_text(caption, tags, text_seed, raw)
     report = (
         f"Built fallback caption text after invalid JSON: {error_message}. "
         f"Used first image of batch size {batch_size}; {original_size[0]}x{original_size[1]} encoded as {encoded_size[0]}x{encoded_size[1]}."
     )
     return _postprocess_result(
-        {"caption": caption, "tags": tags, "text_seed": text_seed, "report": report},
+        {"caption": caption, "tags": tags, "text_seed": text_seed, "report": report, "hiresfix_text": hiresfix_text},
         caption_mode,
         batch_size,
         original_size,
@@ -360,6 +431,7 @@ def _postprocess_result(values, caption_mode, batch_size, original_size, encoded
         tags = _clean_tags(text_seed, caption_mode)
     if not caption:
         caption = _clean_text(text_seed)
+    hiresfix_text = _build_hiresfix_text(caption, tags, text_seed, values.get("hiresfix_text", ""))
 
     report = _clean_text(values.get("report", "Captioned image with Ollama vision model."))
     batch_note = f" Used first image of batch size {batch_size}." if batch_size > 1 else ""
@@ -369,7 +441,7 @@ def _postprocess_result(values, caption_mode, batch_size, original_size, encoded
     if "encoded as" not in report.lower():
         report = f"{report}{size_note}"
 
-    return caption, tags, text_seed, report
+    return caption, tags, text_seed, report, hiresfix_text
 
 
 class NukunOllamaVisionCaptioner:
@@ -473,7 +545,7 @@ class NukunOllamaVisionCaptioner:
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING")
     RETURN_NAMES = OUTPUT_KEYS
     FUNCTION = "caption"
     CATEGORY = "Nukun/Image"
