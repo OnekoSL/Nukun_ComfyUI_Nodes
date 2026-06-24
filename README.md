@@ -30,10 +30,21 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunCheckpointCyclerLoader` - display name `Checkpoint Cycler Loader (Nukun)`, category `Nukun/Loaders`
 - `NukunCheckpointVaeCyclerLoader` - display name `Checkpoint + VAE Cycler Loader (Nukun)`, category `Nukun/Loaders`
 - `NukunCheckpointPairCyclerLoader` - display name `Checkpoint Pair Cycler Loader (Nukun)`, category `Nukun/Loaders`
+- `NukunFourPromptModelCyclerLoader` - display name `4-Prompt Model Cycler Loader (Nukun)`, category `Nukun/Loaders`
+- `NukunFourPromptCheckpointCyclerLoader` - display name `4-Prompt Checkpoint Cycler Loader (Nukun)`, category `Nukun/Loaders`
 - `NukunIncrementingIntString` - display name `Incrementing Int to String (Nukun)`, category `Nukun/Text`
 - `NukunRandomVocabStringList` - display name `Random Vocab String List (Nukun)`, category `Nukun/Text`
 - `NukunVocabMultiStringList` - display name `Multi Vocab String List (Nukun)`, category `Nukun/Text`
 - `NukunOllamaPromptRefiner` - display name `Ollama Prompt Refiner (Nukun)`, category `Nukun/Text`
+- `NukunWan22VideoSettings` - display name `Wan 2.2 Video Settings (Nukun)`, category `Nukun/Video/Wan 2.2`
+- `NukunWan22TI2VLatent` - display name `Wan 2.2 TI2V Latent (Nukun)`, category `Nukun/Video/Wan 2.2`
+- `NukunWan22RunManifest` - display name `Wan 2.2 Run Manifest (Nukun)`, category `Nukun/Video/Wan 2.2`
+- `NukunWan22ContinuationPlan` - plans 1-10 iterative five-second extensions and their memory/duration totals
+- `NukunWan22ContinuationRecord` - appends deterministic per-segment captions, prompts, and seeds to JSON
+- `NukunWan22ContinuationManifest` - combines the base run and continuation log into the final manifest and filename
+- `NukunWan22SegmentStore` - stores one Wan segment as numbered PNG frames, updates `last_frame.png`, and writes segment/run manifests
+- `NukunWan22SegmentLoader` - loads a saved Wan run's current end frame and manifest state for the next manual continuation
+- `NukunWan22FrameSequenceAssembler` - assembles a saved PNG frame sequence into a final MP4 via bundled `imageio_ffmpeg`
 - `NukunOllamaVisionCaptioner` - display name `Ollama Vision Captioner (Nukun)`, category `Nukun/Image`
 - `LoadImagewithSubfolders` - display name `Load Image with Subfolders`, category `Nukun/Image`
 - `T5Balancer` - display name `T5 Token-based Prompt Balancer`, category `Nukun/Conditioning`
@@ -87,6 +98,20 @@ For chunked runs, set `pair_index` to `increment-wrap` and wrap it over the redu
 `combined_modelname` outputs a filename-friendly `modelname_1__x__modelname_2` string for save prefixes.
 Use `vae_name = checkpoint` to keep the VAE from `MODEL_2`, or select an external VAE to override the shared VAE output.
 
+## 4-Prompt Model Cycler Loader
+
+This node cycles four multiline prompt fields for every diffusion model in one exact model folder.
+Keep `cycle_index` on `increment`: indices 0-3 output text 1-4 with the first naturally sorted UNET, index 4 starts text 1 with the next UNET, and the complete model/prompt sequence wraps automatically.
+Empty text fields remain intentional cycle positions. CLIP and VAE stay fixed while `MODEL`, model metadata, prompt/model indices, and the selected text are exposed as outputs.
+`seed_mode` controls the shared seed for each four-prompt model group: `increment` advances once per model, `fixed` always keeps the entered `seed`, and `random` generates a fresh seed when the first group or a new model group is queued in the ComfyUI frontend.
+Random seeds remain fixed inside their four-prompt group. API prompts queued without the frontend use the supplied `seed` unchanged in random mode.
+
+## 4-Prompt Checkpoint Cycler Loader
+
+This node provides the same four-prompt and model-synchronous seed cycle for normal checkpoints.
+It cycles naturally sorted checkpoints from one exact folder and returns the checkpoint's `MODEL`, `CLIP`, and embedded `VAE` together with text, checkpoint metadata, indices, model count, and seed.
+The `increment`, `fixed`, and `random` seed modes behave exactly like the diffusion-model version.
+
 ## Incrementing Int to String
 
 This node replaces the common `Int` plus `Int to String (Mikey)` pattern.
@@ -107,7 +132,7 @@ Connect the optional `chain` input to append generated words after an existing s
 
 ## Ollama Prompt Refiner
 
-This node sends a random vocabulary string to a local Ollama model and returns one curated split prompt set for the selected `target_profile`: `pony_v6`, `illustrious`, `pony_v7`, or `z_image`.
+This node sends a random vocabulary string to a local Ollama model and returns one curated split prompt set for the selected `target_profile`: `pony_v6`, `illustrious`, `pony_v7`, `z_image`, `anima`, or `wan2_2_video`.
 It is designed to sit after `Random Vocab String List (Nukun)` or `Multi Vocab String List (Nukun)`: connect the random `STRING` output to `word_salad`, choose one `target_profile`, then connect the generated prompt outputs to your text encoders.
 The default Ollama endpoint is `http://127.0.0.1:11434` and the default model is `autoren-darkidol-llama-3-1-8b:latest`.
 The `ollama_model` widget is populated from the selected Ollama URL's `/api/tags` list and refreshes in the browser when `ollama_url` changes.
@@ -121,9 +146,23 @@ The `context_length` dropdown offers fixed `num_ctx` values from `2048` to `1310
 The node asks Ollama for strict JSON and retries once with a repair prompt if the model returns malformed JSON.
 This is a breaking output change from older versions that exposed separate `pony_v6_*`, `illustrious_*`, and `pony_v7_*` outputs; reconnect old workflows to `positive` and `negative`.
 
+The `anima` profile starts with a compact quality-tag line, then writes a 180-260 word natural English description in short sentences. It moves from the main figure through appearance, action, materials, and important objects to the environment, lighting, body language, and emotional atmosphere. The split outputs remain available, while `positive` joins them in that order.
+
+The `wan2_2_video` profile creates natural Wan 2.2 video prompts with an explicit continuous action, stable environment, camera behavior, lighting/style guidance, and temporal-artifact negatives. Ollama connectivity is mandatory for the node; connection and timeout failures stop execution with a clear error.
+
+## Wan 2.2 TI2V-5B toolkit
+
+`Wan 2.2 Video Settings (Nukun)` converts duration and FPS to a valid `4n+1` frame count and provides draft, balanced, quality, portrait, landscape, square, and snapped custom resolutions. `Wan 2.2 TI2V Latent (Nukun)` switches T2V/I2V without cable changes and prepares I2V images proportionally with center crop or padding. `Wan 2.2 Run Manifest (Nukun)` records model, dimensions, FPS, both seeds, sampling configuration, and prompts as JSON and a filename-safe prefix.
+
+The continuation helpers support the Easy-Use loop in `anima_to_wan2.2_i2v.json`. Each iteration re-captionizes the current end frame, advances three deterministic seeds, removes the new segment's duplicate first frame, and appends the remaining frames. The final frame formula is `81 + extension_count * 80`; ten extensions produce 881 frames and require about 5.1 GiB of decoded-frame RAM at balanced portrait resolution.
+
+See [WAN22_WORKFLOW_ANALYSIS.md](WAN22_WORKFLOW_ANALYSIS.md) and the example [wan2.2_video_toolkit.json](../../pysssss-workflows/wan2.2_video_toolkit.json) for the full 16 GB workflow and sampling comparison matrix.
+
+The separate [Anima to Wan workflow](../../pysssss-workflows/anima_to_wan2.2_i2v.json) generates a 704x1248 Anima keyframe, captions the actual result with JoyCaption, converts that caption plus a manual motion instruction into a Wan prompt, and renders a balanced portrait I2V video. See [ANIMA_WAN_WORKFLOW.md](ANIMA_WAN_WORKFLOW.md) for controls and verified smoke-test details.
+
 ## Ollama Vision Captioner
 
-This node captions a ComfyUI `IMAGE` with a local Ollama vision model and returns `caption`, `tags`, `text_seed`, and `report`.
+This node captions a ComfyUI `IMAGE` with a local Ollama vision model and returns `caption`, `tags`, `text_seed`, `report`, and `hiresfix_text`.
 The intended wiring is `IMAGE -> Ollama Vision Captioner (Nukun) -> Ollama Prompt Refiner (Nukun)`: connect `text_seed` to the refiner's `word_salad` or use it as a richer `style_anchor`.
 Backend v1 uses only Ollama's `/api/generate` image support, so it does not add Transformers, llama-cpp-python, or other new Python requirements.
 The default model is `user-v4/joycaption-beta`; JoyCaption Alpha Two can be selected or typed through Ollama as `hf.co/Jobaar/Llama-JoyCaption-Alpha-Two-GGUF:F16` or a local alias such as an `ollama pull`/Modelfile name.
@@ -135,6 +174,9 @@ The `ollama_model` dropdown shares the browser refresh helper used by the Prompt
 - `danbooru_tags` prefers 24-48 comma-separated booru-style tags.
 - `pony_source` writes 35-65 comma-free factual image words for Pony v6 and Illustrious workflows.
 - `refiner_seed` writes the richest comma-free 40-80 word seed text for the Prompt Refiner and strips final model-control tags such as `score_9`, `rating_*`, and `style_cluster_*`.
+
+`hiresfix_text` is a direct detail-pass prompt for HiResFix or another upscale/refine text input.
+It describes the same image and adds visible material/detail cues such as `fluffy fur`, `shaggy fur`, `fine hair strands`, `glossy latex highlights`, `leather grain`, `fabric weave`, `metal reflections`, `refined shading`, `clean linework`, and `background detail` when the caption contains matching visual material.
 
 Batch behavior is intentionally simple in v1: only `image[0]` is captioned, and `report` mentions the batch size when additional images were present.
 Images are converted from ComfyUI's float tensor format to RGB JPEG, downscaled to `resize_long_edge = 1024` by default while preserving aspect ratio, base64 encoded, and sent in the Ollama `images` field.

@@ -2,6 +2,15 @@
 
 ## v0.5.0
 
+- Added a Wan 2.2 TI2V-5B toolkit with validated video settings, cable-free T2V/I2V latent switching, proportional image preparation, and reproducible run manifests.
+- Added the `wan2_2_video` Ollama profile with temporal action, camera, environment, and video-artifact guidance.
+- Added the 16 GB `wan2.2_video_toolkit.json` workflow, MP4 export, tiled VAE decode, sampling comparison notes, and Wan-specific unit coverage.
+- Added the separate `anima_to_wan2.2_i2v.json` pipeline with an Anima keyframe, JoyCaption visual bridge, editable Wan motion instruction, five independent seeds, and verified 17-frame GPU smoke coverage.
+- Added iterative Wan continuation planning, JSON records, and final manifests plus an Easy-Use loop that extends the Anima-to-Wan video by 1-10 segments without duplicate transition frames.
+- Added a robust segmented Wan continuation path with `NukunWan22SegmentStore`, `NukunWan22SegmentLoader`, and `NukunWan22FrameSequenceAssembler`, plus start/extend/assemble workflows that persist PNG frames and assemble the final MP4 without relying on dynamic loop nodes.
+- Added `4-Prompt Model Cycler Loader (Nukun)` for synchronized four-prompt-per-UNET folder cycles with `increment`, `fixed`, and frontend-randomized model-synchronous seed modes.
+- Added `4-Prompt Checkpoint Cycler Loader (Nukun)` with the same prompt and seed cycles for normal checkpoints with embedded CLIP and VAE outputs.
+- Fixed both 4-prompt cyclers so ComfyUI's automatic seed randomizer is locked to `fixed`; `seed_mode` is now the only seed controller.
 - Added `Ollama Prompt Refiner (Nukun)` for local Ollama-based split prompt generation with selectable `pony_v6`, `illustrious`, `pony_v7`, and `z_image` target profiles.
 - Added split prompt outputs for `positive`, `negative`, `report`, `base_prompt`, `foreground_prompt`, and `background_prompt`.
 - Added Z-Image prompt refining support and bundled prompt-design reference notes.
@@ -12,6 +21,7 @@
 - Improved `Ollama Prompt Refiner (Nukun)` for Reka Flash GGUF models with a compact JSON-only prompt wrapper, fixed context-length choices, and stricter reasoning cleanup.
 - Improved Pony v6 and Illustrious prompt refining with pre-sorted visual candidates and concrete 30-40 word background tag lists.
 - Changed `Ollama Prompt Refiner (Nukun)` to a single-target workflow; older workflows should reconnect to the new shared prompt outputs.
+- Expanded the Anima profile into 180-260 words of short natural sentences ordered from quality tags and main figure through objects, environment, and emotional atmosphere.
 
 ## v0.4.0
 

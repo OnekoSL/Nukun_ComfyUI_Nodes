@@ -23,7 +23,10 @@ Z_IMAGE_POSITIVE_WORD_RANGE = (360, 440)
 Z_IMAGE_FOREGROUND_MIN_WORDS = 130
 Z_IMAGE_BACKGROUND_MIN_WORDS = 130
 Z_IMAGE_BASE_MIN_WORDS = 80
-TARGET_PROFILES = ("pony_v6", "illustrious", "pony_v7", "z_image", "anima")
+ANIMA_POSITIVE_WORD_RANGE = (180, 260)
+ANIMA_FOREGROUND_WORD_RANGE = (110, 140)
+ANIMA_BACKGROUND_WORD_RANGE = (70, 90)
+TARGET_PROFILES = ("pony_v6", "illustrious", "pony_v7", "z_image", "anima", "wan2_2_video")
 DEFAULT_TARGET_PROFILE = "pony_v7"
 
 OUTPUT_KEYS = (
@@ -129,6 +132,24 @@ NEGATIVE_BASELINES = {
         "logo",
         "blurry",
         "jpeg artifacts",
+    ),
+    "wan2_2_video": (
+        "worst quality",
+        "low quality",
+        "blurry details",
+        "text",
+        "subtitles",
+        "watermark",
+        "flicker",
+        "temporal jitter",
+        "identity drift",
+        "abrupt motion",
+        "frozen motion",
+        "inconsistent limbs",
+        "deformed hands",
+        "duplicate subject",
+        "camera shake",
+        "compression artifacts",
     ),
 }
 
@@ -408,7 +429,8 @@ Rules:
 - Never explain outside JSON.
 - Keep all image prompts in English.
 - Split the positive prompt into global model/style material, foreground subject detail, and background setting detail. For Z-Image, write natural descriptive prose instead of tags.
-- For Anima, write a concise tag/caption hybrid: lowercase Gelbooru/Danbooru-style tags with spaces instead of underscores, except score tags such as score_9, score_8_up, and score_7_up.
+- For Anima, begin with one compact quality-tag line, then write long natural English prose made of short simple sentences.
+- For Anima, order the prose from the main figure through appearance, action, and objects to environment, emotion, and atmosphere.
 - Pony v6 and Pony v7 are model names, not subjects. Do not add a pony, horse, or equine character unless the input explicitly asks for one.
 - Do not invent copyrighted character names unless they appear in the input or style anchor.
 - If the input implies adult content, keep wording as neutral image-generation tags and do not add explicit acts.
@@ -757,7 +779,7 @@ def _with_negative_baseline(target_profile, value):
 
 
 def _strip_commas_for_profile(target_profile, value):
-    if _normalize_target_profile(target_profile) in ("pony_v7", "z_image", "anima"):
+    if _normalize_target_profile(target_profile) in ("pony_v7", "z_image", "anima", "wan2_2_video"):
         return value
     return re.sub(r"\s+", " ", str(value).replace(",", " ")).strip()
 
@@ -865,16 +887,6 @@ def _anima_anchor_style_tags(style_anchor, limit=10):
     return _anima_tags(tags, limit=limit)
 
 
-def _anima_sentence_from_tags(tags, fallback, prefix):
-    cleaned = _anima_tags(tags, limit=18)
-    if not cleaned:
-        cleaned = _anima_tags(fallback, limit=18)
-    if not cleaned:
-        return ""
-    phrase = ", ".join(cleaned[:10])
-    return f"{prefix} {phrase}."
-
-
 def _clean_report(report, target_profile, word_salad, style_anchor):
     report = re.sub(r"\s+", " ", str(report).replace(",", " ")).strip()
     lowered = report.lower()
@@ -889,6 +901,7 @@ def _clean_report(report, target_profile, word_salad, style_anchor):
         "pony_v7": "Pony v7",
         "z_image": "Z-Image",
         "anima": "Anima",
+        "wan2_2_video": "Wan 2.2 video",
     }.get(_normalize_target_profile(target_profile), "selected profile")
     return f"Built one {profile_label} prompt from {core} and removed weak filler terms"
 
@@ -960,6 +973,14 @@ def _postprocess_result(values, target_profile, word_salad, style_anchor, style_
             provided if any(provided.values()) else None,
         )
         positive = _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt)
+    elif target_profile == "wan2_2_video":
+        if not base_prompt:
+            base_prompt = "cinematic video, coherent lighting, stable camera, consistent visual style"
+        if not foreground_prompt:
+            foreground_prompt = positive or "A clearly visible subject performs one continuous, readable action."
+        if not background_prompt:
+            background_prompt = "The environment remains spatially consistent while natural secondary motion supports the action."
+        positive = _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt)
     else:
         base_prompt, foreground_prompt, background_prompt = _structured_pony_v7_parts(
             positive,
@@ -972,7 +993,7 @@ def _postprocess_result(values, target_profile, word_salad, style_anchor, style_
     base_prompt = _strip_commas_for_profile(target_profile, base_prompt)
     foreground_prompt = _strip_commas_for_profile(target_profile, foreground_prompt)
     background_prompt = _strip_commas_for_profile(target_profile, background_prompt)
-    if target_profile not in ("pony_v7", "z_image"):
+    if target_profile not in ("pony_v7", "z_image", "wan2_2_video"):
         positive = _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt)
     positive = _strip_commas_for_profile(target_profile, positive)
     negative = _strip_commas_for_profile(target_profile, negative)
@@ -1263,10 +1284,11 @@ style_candidates: {_candidate_tag_text(data["style_candidates"])}
 discarded_noise: {_candidate_tag_text(data["discarded_noise"])}
 
 Use the candidate lists as the main source of truth.
-You may add a few fitting visual tags when they clarify the image.
+You may add a few fitting visual details when they clarify the image.
 Do not move foreground candidates into background_prompt.
 Do not move background candidates into foreground_prompt.
-For Pony v6, Illustrious, and Anima, write background_prompt as concrete visible background things.
+For Pony v6 and Illustrious, write background_prompt as concrete visible background tags.
+For Anima, turn the candidate ingredients into short natural sentences rather than copying them as a tag list.
 If background_candidates name a setting, expand that setting with matching visible objects from that same kind of place.
 Do not borrow objects from unrelated example settings.
 Do not copy candidate-list names, empty markers, or instruction words into any output value.
@@ -1839,6 +1861,160 @@ def _light_tag_prompt_parts(target_profile, word_salad, style_anchor, provided=N
     return base_prompt, foreground_prompt, background_prompt
 
 
+ANIMA_PROSE_CONTROL_PATTERN = re.compile(
+    r"\b(?:score_\d+(?:_up)?|rating_[a-z0-9_]+|style_cluster_\d+|source_[a-z0-9_]+)\b\s*,?\s*",
+    re.IGNORECASE,
+)
+
+
+def _clean_anima_prose(value):
+    text = re.sub(
+        r"(?im)^\s*(?:base_prompt|foreground_prompt|background_prompt|positive|negative|report|"
+        r"subject(?:\s+and\s+action)?|environment(?:\s+and\s+light)?|emotion(?:al\s+tone)?)\s*[:=\-]\s*",
+        "",
+        str(value),
+    )
+    text = ANIMA_PROSE_CONTROL_PATTERN.sub("", text)
+    text = re.sub(r"\b(?:masterpiece|best[ _]quality)\b\s*,?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"_+", " ", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\s+([,.;!?])", r"\1", text)
+    text = re.sub(r",\s*,+", ", ", text)
+    raw_sentences = re.split(r"(?<=[.!?])\s+|\n+", text.strip())
+    sentences = []
+    seen = set()
+    for raw_sentence in raw_sentences:
+        sentence = re.sub(r"\s+", " ", raw_sentence).strip(" ,.;:-")
+        if not sentence:
+            continue
+        key = sentence.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        sentence = sentence[:1].upper() + sentence[1:]
+        if sentence[-1] not in ".!?":
+            sentence += "."
+        sentences.append(sentence)
+    return " ".join(sentences)
+
+
+def _anima_prose_is_usable(value):
+    text = _clean_anima_prose(value)
+    if _word_count(text) < 12:
+        return False
+    sentence_count = len([part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()])
+    return sentence_count >= 2 and text.count(",") <= max(10, _word_count(text) // 5)
+
+
+def _anima_sentences(value):
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+", _clean_anima_prose(value)) if part.strip()]
+
+
+def _fit_anima_prose(value, fallback, min_words, max_words):
+    sentences = _anima_sentences(value) if _anima_prose_is_usable(value) else []
+    fallback_sentences = _anima_sentences(fallback)
+    seen = {sentence.casefold() for sentence in sentences}
+    for sentence in fallback_sentences:
+        if _word_count(" ".join(sentences)) >= min_words:
+            break
+        if sentence.casefold() not in seen:
+            sentences.append(sentence)
+            seen.add(sentence.casefold())
+
+    fitted = []
+    for sentence in sentences:
+        candidate = " ".join((*fitted, sentence))
+        if fitted and _word_count(candidate) > max_words:
+            break
+        if not fitted and _word_count(sentence) > max_words:
+            continue
+        fitted.append(sentence)
+
+    if _word_count(" ".join(fitted)) < min_words:
+        for sentence in fallback_sentences:
+            if sentence.casefold() in {item.casefold() for item in fitted}:
+                continue
+            candidate = " ".join((*fitted, sentence))
+            if _word_count(candidate) > max_words:
+                break
+            fitted.append(sentence)
+            if _word_count(" ".join(fitted)) >= min_words:
+                break
+    return " ".join(fitted)
+
+
+ANIMA_EMOTION_PATTERN = re.compile(
+    r"\b(?:emotion|emotional|expression|body language|mood|feel|feels|hope|hopeful|fear|fearful|"
+    r"joy|joyful|sad|sadness|anger|angry|calm|tension|tense|intimate|mysterious|melancholy|warmth)\b",
+    re.IGNORECASE,
+)
+
+
+def _ensure_anima_emotional_ending(value, original_value, fallback, min_words, max_words):
+    sentences = _anima_sentences(value)
+    original_sentences = _anima_sentences(original_value)
+    emotional_original = next(
+        (sentence for sentence in reversed(original_sentences[-2:]) if ANIMA_EMOTION_PATTERN.search(sentence)),
+        "",
+    )
+    fallback_sentences = _anima_sentences(fallback)
+    ending = [emotional_original] if emotional_original else fallback_sentences[-2:]
+    ending_keys = {sentence.casefold() for sentence in ending}
+    body = [sentence for sentence in sentences if sentence.casefold() not in ending_keys]
+
+    while body and _word_count(" ".join((*body, *ending))) > max_words:
+        body.pop()
+
+    existing = {sentence.casefold() for sentence in (*body, *ending)}
+    for sentence in fallback_sentences:
+        if _word_count(" ".join((*body, *ending))) >= min_words:
+            break
+        if sentence.casefold() in existing:
+            continue
+        candidate = " ".join((*body, sentence, *ending))
+        if _word_count(candidate) > max_words:
+            continue
+        body.append(sentence)
+        existing.add(sentence.casefold())
+    return " ".join((*body, *ending))
+
+
+def _anima_subject_phrase(terms):
+    cleaned = [_clean_z_image_text(term).lower() for term in terms if _clean_z_image_text(term)]
+    return _sentence_from_terms(cleaned[:4], "a clearly defined anime figure")
+
+
+def _anima_foreground_fallback(foreground_terms, source_terms):
+    subject = _anima_subject_phrase(foreground_terms or source_terms)
+    objects = _anima_subject_phrase((foreground_terms or source_terms)[4:8])
+    return (
+        f"The main figure is built around {subject}, with a clear and readable silhouette. "
+        "The face has carefully shaped features, attentive eyes, and a focused direction of gaze. "
+        "Hair, skin, fur, or other visible surfaces carry distinct color and fine texture. "
+        "Clothing and accessories use believable layers, visible seams, firm edges, and material contrast. "
+        "The pose shows balanced weight, clear limb placement, and an action that reads immediately. "
+        f"Important nearby objects reflect {objects} and connect directly with the figure's hands or movement. "
+        "Small highlights, folds, worn marks, loose strands, and contact shadows strengthen the focal details. "
+        "The camera keeps the figure dominant while allowing every important object to remain understandable. "
+        "The expression is easy to read through the eyes, mouth, shoulders, and direction of movement. "
+        "Body language gives the scene a personal motive instead of a neutral display pose."
+    )
+
+
+def _anima_background_fallback(background_terms, source_terms):
+    setting = _anima_subject_phrase(background_terms or source_terms)
+    return (
+        f"Around the figure, details such as {setting} create a setting with recognizable shapes and surfaces. "
+        "Nearby props occupy the foreground and middle distance without hiding the main action. "
+        "Architecture, terrain, furniture, plants, or machinery establish scale and a believable location. "
+        "A visible light source creates clean highlights, readable shadows, and a controlled color palette. "
+        "Distant forms become softer and smaller, giving the illustration clear depth and atmosphere. "
+        "Air, mist, dust, reflections, or weather connect the figure naturally with the surrounding space. "
+        "The final mood joins the figure's expression with the light, color, and stillness of the environment. "
+        "The scene should feel emotionally specific, visually coherent, and quietly memorable."
+    )
+
+
 def _anima_prompt_parts(value, word_salad, style_anchor, provided=None):
     provided = provided or {}
     combined_source = " ".join(
@@ -1861,57 +2037,37 @@ def _anima_prompt_parts(value, word_salad, style_anchor, provided=None):
 
     base_tags = list(ANIMA_QUALITY_TAGS)
     base_tags.extend(safety_tags)
-    base_tags.extend(_anima_anchor_style_tags(style_anchor, limit=8))
-    base_tags.extend(_tags_from_terms(style_terms[:8], limit=8))
+    base_tags.extend(_anima_anchor_style_tags(style_anchor, limit=5))
+    base_tags.extend(_tags_from_terms(style_terms[:5], limit=5))
     base_tags.extend(ANIMA_BASE_STYLE_TAGS)
-    provided_base = _anima_tag_text(provided.get("base_prompt", ""), limit=12)
+    provided_base = _anima_tag_text(provided.get("base_prompt", ""), limit=8)
     if provided_base:
         base_tags.extend(provided_base.split(", "))
     base_prompt = _anima_tag_text(
         base_tags,
-        limit=18,
+        limit=14,
         fallback="masterpiece, best quality, score_9, score_8_up, score_7_up, anime illustration, clean linework",
     )
 
-    provided_foreground = _anima_tags(provided.get("foreground_prompt", ""), limit=18)
-    if provided_foreground and _word_count(", ".join(provided_foreground)) >= 3:
-        foreground_tags = provided_foreground
-    else:
-        foreground_tags = _generic_foreground_tags_from_terms(foreground_terms or source_terms, limit=28)
-        foreground_tags.extend(_expand_tags_from_terms(source_terms, FOREGROUND_EXPANSIONS))
-    foreground_tags = [
-        tag
-        for tag in _anima_tags(foreground_tags, limit=18)
-        if tag not in ANIMA_QUALITY_TAGS and tag not in safety_tags and not _term_is_background_like(tag)
-    ]
-    foreground_prompt = _anima_sentence_from_tags(
-        foreground_tags,
-        "clear subject, readable pose, focused expression, material texture",
-        "Subject and action:",
+    foreground_fallback = _anima_foreground_fallback(foreground_terms, source_terms)
+    foreground_prompt = _fit_anima_prose(
+        provided.get("foreground_prompt", ""),
+        foreground_fallback,
+        *ANIMA_FOREGROUND_WORD_RANGE,
     )
 
-    provided_background = _anima_tags(provided.get("background_prompt", ""), limit=18)
-    if (
-        provided_background
-        and _word_count(", ".join(provided_background)) >= 3
-        and not _has_generic_background_prompt(", ".join(provided_background))
-    ):
-        background_tags = provided_background
-    else:
-        background_tags = _pony_v6_background_tags_from_terms(background_terms or source_terms, limit=24)
-        background_tags.extend(_tag_profile_background_preset_tags(background_terms or source_terms))
-        background_tags.extend(_expand_tags_from_terms(source_terms, BACKGROUND_EXPANSIONS))
-        if not background_tags:
-            background_tags = _minimal_background_tags()
-    background_tags = [
-        tag
-        for tag in _anima_tags(background_tags, limit=18)
-        if tag not in ANIMA_QUALITY_TAGS and tag not in safety_tags
-    ]
-    background_prompt = _anima_sentence_from_tags(
-        background_tags,
-        "visible setting, ambient lighting, background props, spatial depth",
-        "Environment and light:",
+    background_fallback = _anima_background_fallback(background_terms, all_terms or source_terms)
+    provided_background = provided.get("background_prompt", "")
+    background_prompt = _fit_anima_prose(
+        provided_background,
+        background_fallback,
+        *ANIMA_BACKGROUND_WORD_RANGE,
+    )
+    background_prompt = _ensure_anima_emotional_ending(
+        background_prompt,
+        provided_background,
+        background_fallback,
+        *ANIMA_BACKGROUND_WORD_RANGE,
     )
 
     return base_prompt, foreground_prompt, background_prompt
@@ -2688,7 +2844,10 @@ def _join_positive_parts(target_profile, base_prompt, foreground_prompt, backgro
         return "\n\n".join(str(part).strip() for part in parts if str(part).strip())
     if profile == "anima":
         parts = [str(part).strip().strip(",") for part in (base_prompt, foreground_prompt, background_prompt) if str(part).strip()]
-        return "\n".join(parts)
+        return "\n\n".join(parts)
+    if profile == "wan2_2_video":
+        parts = [str(part).strip() for part in (foreground_prompt, background_prompt, base_prompt) if str(part).strip()]
+        return "\n\n".join(parts)
     if profile == "pony_v7":
         base_sections = [part.strip() for part in re.split(r"\n\s*\n+", str(base_prompt).strip()) if part.strip()]
         header = ""
@@ -2845,6 +3004,18 @@ def _profile_positive_fallback(target_profile, word_salad, style_anchor, style_c
             None,
         )
         return _join_positive_parts("z_image", base_prompt, foreground_prompt, background_prompt)
+    if target_profile == "wan2_2_video":
+        subject = core_terms.rstrip(".,")
+        foreground = (
+            f"{anchor_prefix}{subject}. The subject performs one continuous, physically readable action "
+            "with a clear beginning, progression, and settled ending. Motion remains fluid and identity stays consistent."
+        )
+        background = (
+            "The visible environment remains spatially coherent. Clothing, hair, dust, foliage, or nearby props "
+            "show restrained secondary motion that follows the main action."
+        )
+        base = "cinematic video, stable composition, coherent lighting, natural motion, consistent color and texture"
+        return _join_positive_parts("wan2_2_video", base, foreground, background)
 
     phrase = ", ".join(salad_terms[:12]) if salad_terms else "a coherent anime subject with clean visual focus"
     return _structured_pony_v7_prompt(
@@ -2895,14 +3066,18 @@ def _target_profile_instructions(target_profile, style_cluster):
     if target_profile == "anima":
         return """Target profile: Anima.
 - Anima is an anime, illustration, and artistic image model. It is not a realism profile.
-- Write a concise tag/caption hybrid: one compact tag block plus exactly two short descriptive sentences.
-- base_prompt must start with or contain: masterpiece, best quality, score_9, score_8_up, score_7_up.
-- base_prompt should be one comma-separated block with quality, safety, medium, lighting/style, and composition tags only.
+- Write a natural English image description of about 180 to 260 words in total.
+- Use short, simple sentences, preferably 8 to 18 words each. Avoid long compound sentences.
+- base_prompt must be one compact comma-separated tag line beginning exactly with: masterpiece, best quality, score_9, score_8_up, score_7_up.
+- After those required tags, base_prompt may contain only a few useful safety, medium, lighting, style, and composition tags.
 - Only include safe, sensitive, nsfw, explicit, or guro when one of those safety/content tags appears in the source text or style anchor. Do not add a default safety tag.
-- Use spaces instead of underscores in tags, except score tags such as score_9, score_8_up, score_7_up, score_6, score_1.
-- foreground_prompt must be one sentence describing subject, appearance, pose, action, expression, materials, and focal props.
-- background_prompt must be one sentence describing environment, visible props, light sources, atmosphere, depth, and style finish.
-- Keep the full positive prompt compact: base tag block plus those two sentences, not a 75-token cage and not a long wish list.
+- Use spaces instead of underscores in the base tags, except score tags such as score_9, score_8_up, score_7_up, score_6, score_1.
+- foreground_prompt must contain 5 to 7 short sentences and about 110 to 140 words.
+- Begin foreground_prompt with the main figure. Continue with appearance, face, hair, clothing, materials, pose, action, expression, and important objects held or touched by the figure.
+- background_prompt must contain 4 to 6 short sentences and about 70 to 90 words.
+- Begin background_prompt with nearby objects and the visible setting. Continue with architecture or terrain, light sources, color, atmosphere, and depth.
+- End background_prompt with the figure's emotional expression, body language, and the emotional effect of the whole scene.
+- Write concrete visual prose, not a Danbooru tag list, keyword chain, instruction, or wish list.
 - Do not use Pony v7 controls such as rating_explicit, style_cluster_*, source_* tags, or a rating/style_cluster header.
 - negative should include Anima-appropriate quality/anatomy/artifact negatives and must not repeat the positive prompt."""
     if target_profile == "z_image":
@@ -2916,6 +3091,17 @@ def _target_profile_instructions(target_profile, style_cluster):
 - negative should be an empty string because Z-Image Turbo does not use negative prompts.
 - Do not use control tags such as score_9, source_anthro, rating_explicit, style_cluster, masterpiece, best quality, 8k, or tag spam.
 - Do not include visible section labels."""
+    if target_profile == "wan2_2_video":
+        return """Target profile: Wan 2.2 TI2V-5B video.
+- Write concise natural English visual prose, not Danbooru tags or an image-quality keyword pile.
+- foreground_prompt must identify the subject and describe one continuous temporal action with a clear start, progression, and ending. Include pose, direction, speed, expression, and physically plausible secondary motion when visible.
+- background_prompt must describe the concrete environment, spatial layout, atmosphere, and environmental motion. Keep objects and scene geometry temporally consistent.
+- base_prompt must describe camera framing and movement, lens or shot scale when useful, lighting, color, medium/style, and temporal behavior. State whether the camera is locked, tracking, panning, tilting, or orbiting; do not combine contradictory camera moves.
+- Prefer a single achievable shot. Avoid cuts, montages, scene changes, teleports, and simultaneous unrelated actions.
+- Use positive temporal language such as continuous motion, stable identity, coherent trajectory, natural inertia, and a settled end pose only when it fits the requested scene.
+- negative must focus on video failures: flicker, temporal jitter, identity drift, abrupt motion, frozen motion, inconsistent limbs, duplicate subjects, deformation, camera shake, text, watermark, and compression artifacts.
+- base_prompt + foreground_prompt + background_prompt should normally total 80 to 180 words.
+- Do not include field labels in the values."""
     return f"""Target profile: Pony v7.
 - base_prompt must start with: score_9, rating_explicit, style_cluster_{style_cluster}
 - base_prompt must also contain global model/source/style tags, medium, lighting, camera, and rendering guidance.
@@ -2959,23 +3145,18 @@ background_prompt => {background_prompt}
 negative => low quality worst quality bad anatomy bad hands malformed fingers poorly drawn face text watermark logo blurry
 report => Built an Illustrious split prompt from sorted visual candidates."""
     if target_profile == "anima":
-        base = _anima_tag_text([*fixed_base[:12], *style[:3], "anime_illustration", "digital_art"])
-        foreground_prompt = _anima_sentence_from_tags(
-            [*foreground[:12], "readable_pose", "clear_subject", "material_texture"],
-            "clear subject, readable pose, focused expression, material texture",
-            "Subject and action:",
-        )
-        background_prompt = _anima_sentence_from_tags(
-            background[:24] or _minimal_background_tags(),
-            "visible setting, ambient lighting, background props, spatial depth",
-            "Environment and light:",
+        base, foreground_prompt, background_prompt = _anima_prompt_parts(
+            "",
+            word_salad,
+            style_anchor,
+            {"base_prompt": _anima_tag_text([*fixed_base[:12], *style[:3], "anime_illustration", "digital_art"])},
         )
         return f"""Example field values for Anima using the current candidates only:
 base_prompt => {base}
 foreground_prompt => {foreground_prompt}
 background_prompt => {background_prompt}
 negative => worst quality, low quality, score_1, score_2, score_3, artist name, bad anatomy, bad hands, text, watermark, blurry
-report => Built an Anima tag-hybrid split prompt from sorted visual candidates."""
+report => Built a natural Anima prompt from sorted visual candidates."""
     return ""
 
 
@@ -3002,7 +3183,8 @@ Important:
 - Fill every JSON field with a useful non-empty string, except Z-Image negative which should be empty.
 - Negative fields must describe things to avoid, not repeat the positive prompt. For Z-Image only, negative must be an empty string.
 - Do not treat Pony v6 or Pony v7 as animal subjects.
-- For Anima, do not use Pony v7/SDXL/Z-Image control language such as style_cluster_*, rating_explicit, source_* tags, or long Z-Image prose.
+- For Anima, keep the required quality tags on the first line, then use 180 to 260 words of short natural sentences in subject-to-emotion order.
+- For Anima, do not use Pony v7/SDXL/Z-Image control language such as style_cluster_*, rating_explicit, or source_* tags.
 - Start your response with {{ and end it with }}.
 - Use exactly the requested JSON keys, with no markdown and no commentary.
 - Required JSON keys: {", ".join(RESPONSE_KEYS)}.
@@ -3151,7 +3333,7 @@ class NukunOllamaPromptRefiner:
     RETURN_NAMES = OUTPUT_KEYS
     FUNCTION = "refine"
     CATEGORY = "Nukun/Text"
-    DESCRIPTION = "Uses a local Ollama model to turn random vocabulary into one selected Pony v6, Illustrious, Pony v7, or Z-Image split prompt set."
+    DESCRIPTION = "Uses a local Ollama model to turn source text into a selected image- or Wan 2.2 video-specific split prompt set."
 
     def refine(
         self,
