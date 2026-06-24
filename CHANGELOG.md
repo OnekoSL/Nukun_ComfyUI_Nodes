@@ -8,6 +8,7 @@
 - Added the separate `anima_to_wan2.2_i2v.json` pipeline with an Anima keyframe, JoyCaption visual bridge, editable Wan motion instruction, five independent seeds, and verified 17-frame GPU smoke coverage.
 - Added iterative Wan continuation planning, JSON records, and final manifests plus an Easy-Use loop that extends the Anima-to-Wan video by 1-10 segments without duplicate transition frames.
 - Added a robust segmented Wan continuation path with `NukunWan22SegmentStore`, `NukunWan22SegmentLoader`, and `NukunWan22FrameSequenceAssembler`, plus start/extend/assemble workflows that persist PNG frames and assemble the final MP4 without relying on dynamic loop nodes.
+- Added the segmented Wan workflows under `examples/wan22/` so the complete setup is versioned with the custom nodes.
 - Added `4-Prompt Model Cycler Loader (Nukun)` for synchronized four-prompt-per-UNET folder cycles with `increment`, `fixed`, and frontend-randomized model-synchronous seed modes.
 - Added `4-Prompt Checkpoint Cycler Loader (Nukun)` with the same prompt and seed cycles for normal checkpoints with embedded CLIP and VAE outputs.
 - Fixed both 4-prompt cyclers so ComfyUI's automatic seed randomizer is locked to `fixed`; `seed_mode` is now the only seed controller.

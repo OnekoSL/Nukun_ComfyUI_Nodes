@@ -4,7 +4,8 @@ from pathlib import Path
 
 
 COMFY_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_DIR = COMFY_ROOT / "pysssss-workflows"
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_DIR = PACKAGE_ROOT / "examples" / "wan22"
 
 
 class WorkflowJson:

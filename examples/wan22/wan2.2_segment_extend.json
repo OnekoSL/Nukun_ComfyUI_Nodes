@@ -1,0 +1,2484 @@
+{
+  "last_node_id": 83,
+  "last_link_id": 344,
+  "nodes": [
+    {
+      "id": 22,
+      "type": "Seed (rgthree)",
+      "pos": [
+        -1040,
+        -120
+      ],
+      "size": [
+        260,
+        130
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "dir": 3,
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "dir": 4,
+          "name": "SEED",
+          "type": "INT",
+          "links": [
+            301,
+            334
+          ]
+        }
+      ],
+      "title": "Seed ? Vision Caption Fortsetzung",
+      "properties": {
+        "cnr_id": "rgthree-comfy",
+        "ver": "738105af5fb14e96fbecaf406dc356e284797e8c",
+        "randomMax": 1125899906842624,
+        "randomMin": 0,
+        "Node name for S&R": "Seed (rgthree)",
+        "aux_id": "rgthree-comfy",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "seed": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        33004,
+        "fixed",
+        "",
+        "okay"
+      ]
+    },
+    {
+      "id": 23,
+      "type": "BetterString",
+      "pos": [
+        -1470,
+        -110
+      ],
+      "size": [
+        570,
+        170
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "chain",
+          "name": "chain",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "localized_name": "string",
+          "name": "string",
+          "type": "STRING",
+          "widget": {
+            "name": "string"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "links": [
+            304
+          ]
+        }
+      ],
+      "title": "motion_instruction",
+      "properties": {
+        "cnr_id": "comfyui-better-strings",
+        "ver": "43b21384353cc94f23cdfde65f586d779f91ba47",
+        "Node name for S&R": "BetterString",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "One continuous five-second shot. The character slowly walks forward toward the camera with measured, confident steps, keeping the sword in a calm ready position. Her shoulders turn slightly with the movement before she settles into a composed guard pose. Hair, coat hems, mist, and loose leaves follow with restrained natural inertia. Locked medium-full portrait camera, no cuts, stable identity, natural walking motion, and a settled final pose."
+      ]
+    },
+    {
+      "id": 24,
+      "type": "Seed (rgthree)",
+      "pos": [
+        -1040,
+        40
+      ],
+      "size": [
+        260,
+        130
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "dir": 3,
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "dir": 4,
+          "name": "SEED",
+          "type": "INT",
+          "links": [
+            310,
+            335
+          ]
+        }
+      ],
+      "title": "Seed ? Wan Prompt Fortsetzung",
+      "properties": {
+        "cnr_id": "rgthree-comfy",
+        "ver": "738105af5fb14e96fbecaf406dc356e284797e8c",
+        "randomMax": 1125899906842624,
+        "randomMin": 0,
+        "Node name for S&R": "Seed (rgthree)",
+        "aux_id": "rgthree-comfy",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "seed": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        44005,
+        "fixed",
+        "",
+        "okay"
+      ]
+    },
+    {
+      "id": 28,
+      "type": "UNETLoader",
+      "pos": [
+        1762.6266465492413,
+        -442.7460000387684
+      ],
+      "size": [
+        400,
+        82
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "unet_name",
+          "name": "unet_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "unet_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "weight_dtype",
+          "name": "weight_dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "weight_dtype"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "MODEL",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            318
+          ]
+        }
+      ],
+      "title": "Wan TI2V-5B",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "UNETLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "unet_name": true,
+            "weight_dtype": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "wan\\wan2.2_ti2v_5B_fp16.safetensors",
+        "default"
+      ]
+    },
+    {
+      "id": 29,
+      "type": "CLIPLoader",
+      "pos": [
+        1762.6266465492413,
+        -312.7460000387684
+      ],
+      "size": [
+        400,
+        106
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "clip_name",
+          "name": "clip_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "clip_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "type",
+          "name": "type",
+          "type": "COMBO",
+          "widget": {
+            "name": "type"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "device",
+          "name": "device",
+          "shape": 7,
+          "type": "COMBO",
+          "widget": {
+            "name": "device"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "CLIP",
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            311,
+            313
+          ]
+        }
+      ],
+      "title": "Wan UMT5",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "CLIPLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "clip_name": true,
+            "type": true,
+            "device": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "unet\\umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "wan",
+        "default"
+      ]
+    },
+    {
+      "id": 30,
+      "type": "VAELoader",
+      "pos": [
+        1762.6266465492413,
+        -162.7460000387683
+      ],
+      "size": [
+        400,
+        58
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "vae_name",
+          "name": "vae_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "vae_name"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "VAE",
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            315,
+            326
+          ]
+        }
+      ],
+      "title": "Wan 2.2 VAE",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "VAELoader",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "vae_name": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "wan2.2\\wan2.2_vae.safetensors"
+      ]
+    },
+    {
+      "id": 31,
+      "type": "NukunWan22VideoSettings",
+      "pos": [
+        900,
+        180
+      ],
+      "size": [
+        380,
+        322
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "mode",
+          "name": "mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "quality",
+          "name": "quality",
+          "type": "COMBO",
+          "widget": {
+            "name": "quality"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "orientation",
+          "name": "orientation",
+          "type": "COMBO",
+          "widget": {
+            "name": "orientation"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "duration_seconds",
+          "name": "duration_seconds",
+          "type": "FLOAT",
+          "widget": {
+            "name": "duration_seconds"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "fps",
+          "name": "fps",
+          "type": "FLOAT",
+          "widget": {
+            "name": "fps"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "custom_width",
+          "name": "custom_width",
+          "type": "INT",
+          "widget": {
+            "name": "custom_width"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "custom_height",
+          "name": "custom_height",
+          "type": "INT",
+          "widget": {
+            "name": "custom_height"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "settings",
+          "name": "settings",
+          "type": "WAN22_VIDEO_SETTINGS",
+          "links": [
+            316
+          ]
+        },
+        {
+          "localized_name": "width",
+          "name": "width",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "localized_name": "height",
+          "name": "height",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "localized_name": "length",
+          "name": "length",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "localized_name": "fps",
+          "name": "fps",
+          "type": "FLOAT",
+          "links": [
+            333
+          ]
+        },
+        {
+          "localized_name": "actual_duration",
+          "name": "actual_duration",
+          "type": "FLOAT",
+          "links": null
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Wan Balanced Portrait 544×960 · 81 Frames",
+      "properties": {
+        "aux_id": "OnekoSL/Nukun_ComfyUI_Nodes",
+        "ver": "7206e6febdd17d9403616d6427ae999a7563d313",
+        "Node name for S&R": "NukunWan22VideoSettings",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "mode": true,
+            "quality": true,
+            "orientation": true,
+            "duration_seconds": true,
+            "fps": true,
+            "custom_width": true,
+            "custom_height": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "image_to_video",
+        "balanced",
+        "portrait",
+        5,
+        16,
+        544,
+        960
+      ]
+    },
+    {
+      "id": 35,
+      "type": "PrimitiveNode",
+      "pos": [
+        2647.9517234905284,
+        -441.1272679331665
+      ],
+      "size": [
+        230,
+        82
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "FLOAT",
+          "type": "FLOAT",
+          "widget": {
+            "name": "shift"
+          },
+          "links": [
+            319
+          ]
+        }
+      ],
+      "title": "Wan Shift",
+      "properties": {
+        "Run widget replace on values": false,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        8,
+        "fixed"
+      ]
+    },
+    {
+      "id": 36,
+      "type": "ModelSamplingSD3",
+      "pos": [
+        2819.539349629851,
+        -175.58333256199896
+      ],
+      "size": [
+        230,
+        75
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "MODEL",
+          "link": 318
+        },
+        {
+          "localized_name": "shift",
+          "name": "shift",
+          "type": "FLOAT",
+          "widget": {
+            "name": "shift"
+          },
+          "link": 319
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "MODEL",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            320
+          ]
+        }
+      ],
+      "title": "Wan Model Shift",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "ModelSamplingSD3",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "shift": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        8
+      ]
+    },
+    {
+      "id": 38,
+      "type": "Seed (rgthree)",
+      "pos": [
+        -1040,
+        200
+      ],
+      "size": [
+        300,
+        130
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "dir": 3,
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "dir": 4,
+          "name": "SEED",
+          "type": "INT",
+          "links": [
+            324,
+            336
+          ]
+        }
+      ],
+      "title": "Seed ? Wan Sampling Fortsetzung",
+      "properties": {
+        "cnr_id": "rgthree-comfy",
+        "ver": "738105af5fb14e96fbecaf406dc356e284797e8c",
+        "randomMax": 1125899906842624,
+        "randomMin": 0,
+        "Node name for S&R": "Seed (rgthree)",
+        "aux_id": "rgthree-comfy",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "seed": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        55006,
+        "fixed",
+        "",
+        "okay"
+      ]
+    },
+    {
+      "id": 56,
+      "type": "NukunOllamaVisionCaptioner",
+      "pos": [
+        5300,
+        -390
+      ],
+      "size": [
+        393.5561486446495,
+        354
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 300
+        },
+        {
+          "localized_name": "custom_instruction",
+          "name": "custom_instruction",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "localized_name": "ollama_url",
+          "name": "ollama_url",
+          "type": "STRING",
+          "widget": {
+            "name": "ollama_url"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "ollama_model",
+          "name": "ollama_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "ollama_model"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "caption_mode",
+          "name": "caption_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "caption_mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": 301
+        },
+        {
+          "localized_name": "temperature",
+          "name": "temperature",
+          "type": "FLOAT",
+          "widget": {
+            "name": "temperature"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "top_p",
+          "name": "top_p",
+          "type": "FLOAT",
+          "widget": {
+            "name": "top_p"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "timeout_seconds",
+          "name": "timeout_seconds",
+          "type": "INT",
+          "widget": {
+            "name": "timeout_seconds"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "context_length",
+          "name": "context_length",
+          "type": "COMBO",
+          "widget": {
+            "name": "context_length"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "resize_long_edge",
+          "name": "resize_long_edge",
+          "type": "INT",
+          "widget": {
+            "name": "resize_long_edge"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "caption",
+          "name": "caption",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "tags",
+          "name": "tags",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "text_seed",
+          "name": "text_seed",
+          "type": "STRING",
+          "links": [
+            303,
+            338
+          ]
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "hiresfix_text",
+          "name": "hiresfix_text",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "JoyCaption · aktuelles Endframe",
+      "properties": {
+        "aux_id": "OnekoSL/Nukun_ComfyUI_Nodes",
+        "ver": "7206e6febdd17d9403616d6427ae999a7563d313",
+        "Node name for S&R": "NukunOllamaVisionCaptioner",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "ollama_url": true,
+            "ollama_model": true,
+            "caption_mode": true,
+            "seed": true,
+            "temperature": true,
+            "top_p": true,
+            "timeout_seconds": true,
+            "context_length": true,
+            "resize_long_edge": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "http://127.0.0.1:11434",
+        "autoren-joycaption-alpha-two:latest",
+        "refiner_seed",
+        33004,
+        "fixed",
+        0.2,
+        0.9,
+        240,
+        "8192",
+        1024
+      ]
+    },
+    {
+      "id": 57,
+      "type": "BetterString",
+      "pos": [
+        -1470,
+        130
+      ],
+      "size": [
+        570,
+        170
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "chain",
+          "name": "chain",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "localized_name": "string",
+          "name": "string",
+          "type": "STRING",
+          "widget": {
+            "name": "string"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "links": [
+            305
+          ]
+        }
+      ],
+      "title": "continuation_instruction",
+      "properties": {
+        "cnr_id": "comfyui-better-strings",
+        "ver": "43b21384353cc94f23cdfde65f586d779f91ba47",
+        "Node name for S&R": "BetterString",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Continue from the exact pose, position, camera, lighting and scene state visible in the current end frame. Evolve the existing action naturally instead of restarting it. Preserve identity, clothing, props and environment. No cuts, no teleportation, no return to the original starting pose, and no sudden camera reset. End in a stable pose that can itself continue into another segment."
+      ]
+    },
+    {
+      "id": 58,
+      "type": "CR Text Concatenate",
+      "pos": [
+        5740,
+        -360
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "text1",
+          "name": "text1",
+          "shape": 7,
+          "type": "STRING",
+          "link": 302
+        },
+        {
+          "localized_name": "text2",
+          "name": "text2",
+          "shape": 7,
+          "type": "STRING",
+          "link": 303
+        },
+        {
+          "localized_name": "separator",
+          "name": "separator",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "separator"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "*",
+          "links": [
+            306
+          ]
+        },
+        {
+          "localized_name": "show_help",
+          "name": "show_help",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Identitätsanker · Original + aktuelles Endframe",
+      "properties": {
+        "cnr_id": "ComfyUI_Comfyroll_CustomNodes",
+        "ver": "d78b780ae43fcf8c6b7c6505e6ffb4584281ceca",
+        "ue_properties": {
+          "version": "7.0.1",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "CR Text Concatenate"
+      },
+      "widgets_values": [
+        "\n\nCURRENT END FRAME:\n"
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 59,
+      "type": "CR Text Concatenate",
+      "pos": [
+        5740,
+        0
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "text1",
+          "name": "text1",
+          "shape": 7,
+          "type": "STRING",
+          "link": 304
+        },
+        {
+          "localized_name": "text2",
+          "name": "text2",
+          "shape": 7,
+          "type": "STRING",
+          "link": 305
+        },
+        {
+          "localized_name": "separator",
+          "name": "separator",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "separator"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "*",
+          "links": [
+            307,
+            308
+          ]
+        },
+        {
+          "localized_name": "show_help",
+          "name": "show_help",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Bewegung · Motion + Fortsetzungsregel",
+      "properties": {
+        "cnr_id": "ComfyUI_Comfyroll_CustomNodes",
+        "ver": "d78b780ae43fcf8c6b7c6505e6ffb4584281ceca",
+        "ue_properties": {
+          "version": "7.0.1",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "CR Text Concatenate"
+      },
+      "widgets_values": [
+        "\n\nCONTINUATION RULES:\n"
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 60,
+      "type": "CR Text Concatenate",
+      "pos": [
+        6100,
+        -180
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "text1",
+          "name": "text1",
+          "shape": 7,
+          "type": "STRING",
+          "link": 306
+        },
+        {
+          "localized_name": "text2",
+          "name": "text2",
+          "shape": 7,
+          "type": "STRING",
+          "link": 307
+        },
+        {
+          "localized_name": "separator",
+          "name": "separator",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "separator"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "*",
+          "links": [
+            309
+          ]
+        },
+        {
+          "localized_name": "show_help",
+          "name": "show_help",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Fortsetzungs-Promptbasis",
+      "properties": {
+        "cnr_id": "ComfyUI_Comfyroll_CustomNodes",
+        "ver": "d78b780ae43fcf8c6b7c6505e6ffb4584281ceca",
+        "ue_properties": {
+          "version": "7.0.1",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "CR Text Concatenate"
+      },
+      "widgets_values": [
+        "\n\nMOTION AND CAMERA:\n"
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 61,
+      "type": "NukunOllamaPromptRefiner",
+      "pos": [
+        6440,
+        -330
+      ],
+      "size": [
+        620,
+        500
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "style_anchor",
+          "name": "style_anchor",
+          "shape": 7,
+          "type": "STRING",
+          "link": 308
+        },
+        {
+          "localized_name": "word_salad",
+          "name": "word_salad",
+          "type": "STRING",
+          "widget": {
+            "name": "word_salad"
+          },
+          "link": 309
+        },
+        {
+          "localized_name": "ollama_url",
+          "name": "ollama_url",
+          "type": "STRING",
+          "widget": {
+            "name": "ollama_url"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "ollama_model",
+          "name": "ollama_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "ollama_model"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "target_profile",
+          "name": "target_profile",
+          "type": "COMBO",
+          "widget": {
+            "name": "target_profile"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": 310
+        },
+        {
+          "localized_name": "temperature",
+          "name": "temperature",
+          "type": "FLOAT",
+          "widget": {
+            "name": "temperature"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "top_p",
+          "name": "top_p",
+          "type": "FLOAT",
+          "widget": {
+            "name": "top_p"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "style_cluster",
+          "name": "style_cluster",
+          "type": "INT",
+          "widget": {
+            "name": "style_cluster"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "timeout_seconds",
+          "name": "timeout_seconds",
+          "type": "INT",
+          "widget": {
+            "name": "timeout_seconds"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "context_length",
+          "name": "context_length",
+          "type": "COMBO",
+          "widget": {
+            "name": "context_length"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "positive",
+          "name": "positive",
+          "type": "STRING",
+          "links": [
+            312,
+            339
+          ]
+        },
+        {
+          "localized_name": "negative",
+          "name": "negative",
+          "type": "STRING",
+          "links": [
+            314,
+            340
+          ]
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "base_prompt",
+          "name": "base_prompt",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "foreground_prompt",
+          "name": "foreground_prompt",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "background_prompt",
+          "name": "background_prompt",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Ollama · nächste Wan-Fortsetzung",
+      "properties": {
+        "aux_id": "OnekoSL/Nukun_ComfyUI_Nodes",
+        "ver": "7206e6febdd17d9403616d6427ae999a7563d313",
+        "Node name for S&R": "NukunOllamaPromptRefiner",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "word_salad": true,
+            "ollama_url": true,
+            "ollama_model": true,
+            "target_profile": true,
+            "seed": true,
+            "temperature": true,
+            "top_p": true,
+            "style_cluster": true,
+            "timeout_seconds": true,
+            "context_length": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "",
+        "http://127.0.0.1:11434",
+        "autoren-reka-flash-3-21b-reasoning:latest",
+        "wan2_2_video",
+        44005,
+        "fixed",
+        0.3,
+        0.9,
+        430,
+        180,
+        "8192"
+      ]
+    },
+    {
+      "id": 62,
+      "type": "CLIPTextEncode",
+      "pos": [
+        7100,
+        -330
+      ],
+      "size": [
+        370,
+        150
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "clip",
+          "name": "clip",
+          "type": "CLIP",
+          "link": 311
+        },
+        {
+          "localized_name": "text",
+          "name": "text",
+          "type": "STRING",
+          "widget": {
+            "name": "text"
+          },
+          "link": 312
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "CONDITIONING",
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            321
+          ]
+        }
+      ],
+      "title": "Wan Positive · Fortsetzung",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "CLIPTextEncode",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "text": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 63,
+      "type": "CLIPTextEncode",
+      "pos": [
+        7100,
+        -80
+      ],
+      "size": [
+        370,
+        120
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "clip",
+          "name": "clip",
+          "type": "CLIP",
+          "link": 313
+        },
+        {
+          "localized_name": "text",
+          "name": "text",
+          "type": "STRING",
+          "widget": {
+            "name": "text"
+          },
+          "link": 314
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "CONDITIONING",
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            322
+          ]
+        }
+      ],
+      "title": "Wan Negative · Fortsetzung",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "CLIPTextEncode",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "text": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 64,
+      "type": "NukunWan22TI2VLatent",
+      "pos": [
+        7100,
+        180
+      ],
+      "size": [
+        370,
+        170
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "vae",
+          "name": "vae",
+          "type": "VAE",
+          "link": 315
+        },
+        {
+          "localized_name": "settings",
+          "name": "settings",
+          "type": "WAN22_VIDEO_SETTINGS",
+          "link": 316
+        },
+        {
+          "localized_name": "start_image",
+          "name": "start_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 317
+        },
+        {
+          "localized_name": "resize_mode",
+          "name": "resize_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "resize_mode"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "latent",
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            323
+          ]
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Endframe → Wan I2V Latent",
+      "properties": {
+        "aux_id": "OnekoSL/Nukun_ComfyUI_Nodes",
+        "ver": "7206e6febdd17d9403616d6427ae999a7563d313",
+        "Node name for S&R": "NukunWan22TI2VLatent",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "resize_mode": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "center_crop"
+      ]
+    },
+    {
+      "id": 65,
+      "type": "KSampler",
+      "pos": [
+        7580,
+        -170
+      ],
+      "size": [
+        320,
+        330
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "MODEL",
+          "link": 320
+        },
+        {
+          "localized_name": "positive",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 321
+        },
+        {
+          "localized_name": "negative",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 322
+        },
+        {
+          "localized_name": "latent_image",
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 323
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": 324
+        },
+        {
+          "localized_name": "steps",
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "cfg",
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "sampler_name",
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "scheduler",
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "denoise",
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "LATENT",
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            325
+          ]
+        }
+      ],
+      "title": "Wan Fortsetzungs-Sampling ? direkt",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "KSampler",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "seed": true,
+            "steps": true,
+            "cfg": true,
+            "sampler_name": true,
+            "scheduler": true,
+            "denoise": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        55006,
+        "fixed",
+        25,
+        5,
+        "dpmpp_2m",
+        "bong_tangent",
+        1
+      ]
+    },
+    {
+      "id": 66,
+      "type": "VAEDecodeTiled",
+      "pos": [
+        7970,
+        -170
+      ],
+      "size": [
+        300,
+        230
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "samples",
+          "name": "samples",
+          "type": "LATENT",
+          "link": 325
+        },
+        {
+          "localized_name": "vae",
+          "name": "vae",
+          "type": "VAE",
+          "link": 326
+        },
+        {
+          "localized_name": "tile_size",
+          "name": "tile_size",
+          "type": "INT",
+          "widget": {
+            "name": "tile_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "overlap",
+          "name": "overlap",
+          "type": "INT",
+          "widget": {
+            "name": "overlap"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "temporal_size",
+          "name": "temporal_size",
+          "type": "INT",
+          "widget": {
+            "name": "temporal_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "temporal_overlap",
+          "name": "temporal_overlap",
+          "type": "INT",
+          "widget": {
+            "name": "temporal_overlap"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "IMAGE",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            330
+          ]
+        }
+      ],
+      "title": "16-GB Tiled Decode · Fortsetzung",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "VAEDecodeTiled",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "tile_size": true,
+            "overlap": true,
+            "temporal_size": true,
+            "temporal_overlap": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        512,
+        64,
+        32,
+        8
+      ]
+    },
+    {
+      "id": 80,
+      "type": "NukunWan22SegmentLoader",
+      "pos": [
+        -1470,
+        -420
+      ],
+      "size": [
+        430,
+        260
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "run_id",
+          "name": "run_id",
+          "type": "STRING",
+          "widget": {
+            "name": "run_id"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "segment_index",
+          "name": "segment_index",
+          "type": "INT",
+          "widget": {
+            "name": "segment_index"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "last_frame",
+          "name": "last_frame",
+          "type": "IMAGE",
+          "links": [
+            300,
+            317
+          ]
+        },
+        {
+          "localized_name": "run_id",
+          "name": "run_id",
+          "type": "STRING",
+          "links": [
+            331
+          ]
+        },
+        {
+          "localized_name": "segment_index",
+          "name": "segment_index",
+          "type": "INT",
+          "links": [
+            332
+          ]
+        },
+        {
+          "localized_name": "total_frame_count",
+          "name": "total_frame_count",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "localized_name": "original_caption",
+          "name": "original_caption",
+          "type": "STRING",
+          "links": [
+            302,
+            337
+          ]
+        },
+        {
+          "localized_name": "current_caption",
+          "name": "current_caption",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "run_manifest_json",
+          "name": "run_manifest_json",
+          "type": "STRING",
+          "links": [
+            341
+          ]
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Run laden ? letztes Frame",
+      "properties": {
+        "aux_id": "OnekoSL/Nukun_ComfyUI_Nodes",
+        "Node name for S&R": "NukunWan22SegmentLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "wan_run_001",
+        -1
+      ]
+    },
+    {
+      "id": 81,
+      "type": "NukunWan22SegmentStore",
+      "pos": [
+        3520,
+        -260
+      ],
+      "size": [
+        560,
+        560
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 330
+        },
+        {
+          "localized_name": "run_id",
+          "name": "run_id",
+          "type": "STRING",
+          "widget": {
+            "name": "run_id"
+          },
+          "link": 331
+        },
+        {
+          "localized_name": "segment_index",
+          "name": "segment_index",
+          "type": "INT",
+          "widget": {
+            "name": "segment_index"
+          },
+          "link": 332
+        },
+        {
+          "localized_name": "fps",
+          "name": "fps",
+          "type": "FLOAT",
+          "widget": {
+            "name": "fps"
+          },
+          "link": 333
+        },
+        {
+          "localized_name": "drop_first_frame",
+          "name": "drop_first_frame",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "drop_first_frame"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "overwrite_segment",
+          "name": "overwrite_segment",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "overwrite_segment"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "vision_seed",
+          "name": "vision_seed",
+          "type": "INT",
+          "widget": {
+            "name": "vision_seed"
+          },
+          "link": 334
+        },
+        {
+          "localized_name": "prompt_seed",
+          "name": "prompt_seed",
+          "type": "INT",
+          "widget": {
+            "name": "prompt_seed"
+          },
+          "link": 335
+        },
+        {
+          "localized_name": "sampling_seed",
+          "name": "sampling_seed",
+          "type": "INT",
+          "widget": {
+            "name": "sampling_seed"
+          },
+          "link": 336
+        },
+        {
+          "localized_name": "original_caption",
+          "name": "original_caption",
+          "type": "STRING",
+          "widget": {
+            "name": "original_caption"
+          },
+          "link": 337
+        },
+        {
+          "localized_name": "current_caption",
+          "name": "current_caption",
+          "type": "STRING",
+          "widget": {
+            "name": "current_caption"
+          },
+          "link": 338
+        },
+        {
+          "localized_name": "positive",
+          "name": "positive",
+          "type": "STRING",
+          "widget": {
+            "name": "positive"
+          },
+          "link": 339
+        },
+        {
+          "localized_name": "negative",
+          "name": "negative",
+          "type": "STRING",
+          "widget": {
+            "name": "negative"
+          },
+          "link": 340
+        },
+        {
+          "localized_name": "run_manifest_json",
+          "name": "run_manifest_json",
+          "type": "STRING",
+          "widget": {
+            "name": "run_manifest_json"
+          },
+          "link": 341
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "run_id",
+          "name": "run_id",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "run_dir",
+          "name": "run_dir",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "next_segment_index",
+          "name": "next_segment_index",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "localized_name": "stored_frame_count",
+          "name": "stored_frame_count",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "localized_name": "total_frame_count",
+          "name": "total_frame_count",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "localized_name": "last_frame",
+          "name": "last_frame",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "localized_name": "segment_manifest_json",
+          "name": "segment_manifest_json",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": [
+            342
+          ]
+        }
+      ],
+      "title": "Fortsetzungssegment speichern ? Frame 0 ?berspringen",
+      "properties": {
+        "aux_id": "OnekoSL/Nukun_ComfyUI_Nodes",
+        "Node name for S&R": "NukunWan22SegmentStore",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "wan_run_001",
+        1,
+        16,
+        true,
+        true,
+        33004,
+        44005,
+        55006,
+        "",
+        "",
+        "",
+        "",
+        "{}"
+      ]
+    },
+    {
+      "id": 82,
+      "type": "PreviewAny",
+      "pos": [
+        4140,
+        -250
+      ],
+      "size": [
+        300,
+        160
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "source",
+          "name": "source",
+          "type": "*",
+          "link": 342
+        }
+      ],
+      "outputs": [],
+      "title": "Fortsetzung Bericht",
+      "properties": {
+        "Node name for S&R": "PreviewAny",
+        "aux_id": "rgthree-comfy",
+        "ue_properties": {
+          "version": "7.8",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "id": 83,
+      "type": "Note",
+      "pos": [
+        -1470,
+        420
+      ],
+      "size": [
+        720,
+        260
+      ],
+      "flags": {},
+      "order": 24,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "Bedienung ? Fortsetzung",
+      "properties": {},
+      "widgets_values": [
+        "Queue erzeugt genau ein weiteres Segment f?r den angegebenen run_id.\n\nSegmentLoader l?dt state/last_frame.png. JoyCaption analysiert dieses Endframe neu. SegmentStore verwirft Frame 0 des neuen Wan-Clips und h?ngt nur Frames 1?80 an den Frame-Ordner.\n\nsegment_index = -1 im Loader bedeutet: automatisch das n?chste Segment verwenden."
+      ]
+    }
+  ],
+  "links": [
+    [
+      300,
+      80,
+      0,
+      56,
+      0,
+      "IMAGE"
+    ],
+    [
+      301,
+      22,
+      0,
+      56,
+      5,
+      "INT"
+    ],
+    [
+      302,
+      80,
+      4,
+      58,
+      0,
+      "STRING"
+    ],
+    [
+      303,
+      56,
+      2,
+      58,
+      1,
+      "STRING"
+    ],
+    [
+      304,
+      23,
+      0,
+      59,
+      0,
+      "STRING"
+    ],
+    [
+      305,
+      57,
+      0,
+      59,
+      1,
+      "STRING"
+    ],
+    [
+      306,
+      58,
+      0,
+      60,
+      0,
+      "STRING"
+    ],
+    [
+      307,
+      59,
+      0,
+      60,
+      1,
+      "STRING"
+    ],
+    [
+      308,
+      59,
+      0,
+      61,
+      0,
+      "STRING"
+    ],
+    [
+      309,
+      60,
+      0,
+      61,
+      1,
+      "STRING"
+    ],
+    [
+      310,
+      24,
+      0,
+      61,
+      5,
+      "INT"
+    ],
+    [
+      311,
+      29,
+      0,
+      62,
+      0,
+      "CLIP"
+    ],
+    [
+      312,
+      61,
+      0,
+      62,
+      1,
+      "STRING"
+    ],
+    [
+      313,
+      29,
+      0,
+      63,
+      0,
+      "CLIP"
+    ],
+    [
+      314,
+      61,
+      1,
+      63,
+      1,
+      "STRING"
+    ],
+    [
+      315,
+      30,
+      0,
+      64,
+      0,
+      "VAE"
+    ],
+    [
+      316,
+      31,
+      0,
+      64,
+      1,
+      "WAN22_VIDEO_SETTINGS"
+    ],
+    [
+      317,
+      80,
+      0,
+      64,
+      2,
+      "IMAGE"
+    ],
+    [
+      318,
+      28,
+      0,
+      36,
+      0,
+      "MODEL"
+    ],
+    [
+      319,
+      35,
+      0,
+      36,
+      1,
+      "FLOAT"
+    ],
+    [
+      320,
+      36,
+      0,
+      65,
+      0,
+      "MODEL"
+    ],
+    [
+      321,
+      62,
+      0,
+      65,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      322,
+      63,
+      0,
+      65,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      323,
+      64,
+      0,
+      65,
+      3,
+      "LATENT"
+    ],
+    [
+      324,
+      38,
+      0,
+      65,
+      4,
+      "INT"
+    ],
+    [
+      325,
+      65,
+      0,
+      66,
+      0,
+      "LATENT"
+    ],
+    [
+      326,
+      30,
+      0,
+      66,
+      1,
+      "VAE"
+    ],
+    [
+      330,
+      66,
+      0,
+      81,
+      0,
+      "IMAGE"
+    ],
+    [
+      331,
+      80,
+      1,
+      81,
+      1,
+      "STRING"
+    ],
+    [
+      332,
+      80,
+      2,
+      81,
+      2,
+      "INT"
+    ],
+    [
+      333,
+      31,
+      4,
+      81,
+      3,
+      "FLOAT"
+    ],
+    [
+      334,
+      22,
+      0,
+      81,
+      6,
+      "INT"
+    ],
+    [
+      335,
+      24,
+      0,
+      81,
+      7,
+      "INT"
+    ],
+    [
+      336,
+      38,
+      0,
+      81,
+      8,
+      "INT"
+    ],
+    [
+      337,
+      80,
+      4,
+      81,
+      9,
+      "STRING"
+    ],
+    [
+      338,
+      56,
+      2,
+      81,
+      10,
+      "STRING"
+    ],
+    [
+      339,
+      61,
+      0,
+      81,
+      11,
+      "STRING"
+    ],
+    [
+      340,
+      61,
+      1,
+      81,
+      12,
+      "STRING"
+    ],
+    [
+      341,
+      80,
+      6,
+      81,
+      13,
+      "STRING"
+    ],
+    [
+      342,
+      81,
+      7,
+      82,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.43636363636363773,
+      "offset": [
+        -2013.5647396709612,
+        742.2314035892728
+      ]
+    },
+    "workflowRendererVersion": "LG",
+    "ue_links": [],
+    "links_added_by_ue": []
+  },
+  "version": 0.4
+}

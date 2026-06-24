@@ -4,9 +4,9 @@ The separate workflow [anima_to_wan2.2_i2v.json](../../pysssss-workflows/anima_t
 
 The recommended robust continuation path now avoids dynamic ComfyUI loop nodes:
 
-- [anima_to_wan2.2_segment_start.json](../../pysssss-workflows/anima_to_wan2.2_segment_start.json) renders segment 0 and stores numbered PNG frames.
-- [wan2.2_segment_extend.json](../../pysssss-workflows/wan2.2_segment_extend.json) loads the saved `last_frame.png`, renders one more Wan segment, drops its duplicate first frame, and appends frames to the same run folder.
-- [wan2.2_segment_assemble.json](../../pysssss-workflows/wan2.2_segment_assemble.json) checks the frame sequence and writes the final MP4.
+- [examples/wan22/anima_to_wan2.2_segment_start.json](examples/wan22/anima_to_wan2.2_segment_start.json) renders segment 0 and stores numbered PNG frames.
+- [examples/wan22/wan2.2_segment_extend.json](examples/wan22/wan2.2_segment_extend.json) loads the saved `last_frame.png`, renders one more Wan segment, drops its duplicate first frame, and appends frames to the same run folder.
+- [examples/wan22/wan2.2_segment_assemble.json](examples/wan22/wan2.2_segment_assemble.json) checks the frame sequence and writes the final MP4.
 
 ## Pipeline
 

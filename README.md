@@ -77,6 +77,8 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunHiResFixTiled` - display name `HiResFix Tiled (Nukun)`, category `Nukun/Sampling`
 - `NukunTiledHiResFixAdvanced` - display name `Tiled HiRes Fix Advanced (Nukun)`, category `Nukun/Sampling`
 
+Wan 2.2 example workflows live in `examples/wan22/`, including the segmented Anima-to-Wan start, extension, and final assembly workflows.
+
 ## Checkpoint Cycler Loader
 
 This node replaces the common `PrimitiveNode` plus `Checkpoint Loader w/Name (WLSH)` pattern.
