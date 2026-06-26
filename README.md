@@ -130,7 +130,7 @@ Bundled category vocabularies include places/environments, objects, animals and 
 Bundled Little Doom LoRA keyword resources are also available as `little_doom_*.csv`, including clean, character/source, visual feature, clothing, action, setting, style, mature, and dark/gore subsets.
 Connect the optional `chain` input to append generated words after an existing string and build prompt chains.
 
-`Multi Vocab String List (Nukun)` combines four selectable vocab files in one node. Each slot has its own amount and three optional direct word selectors; keep a selector on `(random)` to fill it from the chosen vocabulary. The node returns a combined string plus one output per slot.
+`Multi Vocab String List (Nukun)` combines four selectable vocab files in one node. Each slot has its own `amount` and incrementable `word_index` cursor, so ComfyUI's control-after-generate menu can keep, increment, decrement, or randomize each slot independently. The node returns a combined string plus one output per slot.
 
 ## Ollama Prompt Refiner
 
