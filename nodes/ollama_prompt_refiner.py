@@ -787,6 +787,30 @@ def _strip_commas_for_profile(target_profile, value):
 ANIMA_SAFETY_TAGS = ("safe", "sensitive", "nsfw", "explicit", "guro")
 ANIMA_QUALITY_TAGS = ("masterpiece", "best quality", "score_9", "score_8_up", "score_7_up")
 ANIMA_BASE_STYLE_TAGS = ("anime illustration", "digital art", "clean linework")
+ANIMA_FALLBACK_META_TERMS = {
+    "anime",
+    "anime_illustration",
+    "art",
+    "best",
+    "best_quality",
+    "clean",
+    "clean_linework",
+    "digital",
+    "digital_art",
+    "explicit",
+    "illustration",
+    "linework",
+    "masterpiece",
+    "newest",
+    "nsfw",
+    "quality",
+    "safe",
+    "score_7_up",
+    "score_8_up",
+    "score_9",
+    "sensitive",
+    "year",
+}
 
 
 def _anima_safety_tags(*values):
@@ -885,6 +909,13 @@ def _anima_anchor_style_tags(style_anchor, limit=10):
             if normalized and normalized not in ANIMA_SAFETY_TAGS and not _term_is_background_like(normalized):
                 tags.append(normalized)
     return _anima_tags(tags, limit=limit)
+
+
+def _anima_style_anchor_base_tags(style_anchor, limit=24):
+    tags = _anima_tags(style_anchor, limit=limit)
+    if any(tag not in ANIMA_SAFETY_TAGS for tag in tags):
+        return tags
+    return []
 
 
 def _clean_report(report, target_profile, word_salad, style_anchor):
@@ -1247,10 +1278,15 @@ def _candidate_data(target_profile, word_salad, style_anchor):
         foreground_tags = _pony_v6_foreground_tags_from_terms(source_terms, limit=36)
     else:
         if target_profile == "anima":
-            fixed_base_tags = ("masterpiece", "best_quality", "score_9", "score_8_up", "score_7_up", *_anima_safety_tags(word_salad, style_anchor))
-            fixed_base_tags = list(fixed_base_tags)
-            fixed_base_tags.extend(anchor_tags)
-            fixed_base_tags.extend(("anime_illustration", "digital_art", "clean_linework"))
+            anchor_base_tags = _anima_style_anchor_base_tags(style_anchor)
+            if anchor_base_tags:
+                fixed_base_tags = list(anchor_base_tags)
+                fixed_base_tags.extend(_anima_safety_tags(word_salad, style_anchor))
+            else:
+                fixed_base_tags = ("masterpiece", "best_quality", "score_9", "score_8_up", "score_7_up", *_anima_safety_tags(word_salad, style_anchor))
+                fixed_base_tags = list(fixed_base_tags)
+                fixed_base_tags.extend(anchor_tags)
+                fixed_base_tags.extend(("anime_illustration", "digital_art", "clean_linework"))
         else:
             fixed_base_tags = list(ILLUSTRIOUS_BASE_TAGS)
             fixed_base_tags.extend(anchor_tags)
@@ -1980,13 +2016,34 @@ def _ensure_anima_emotional_ending(value, original_value, fallback, min_words, m
 
 
 def _anima_subject_phrase(terms):
-    cleaned = [_clean_z_image_text(term).lower() for term in terms if _clean_z_image_text(term)]
+    cleaned = [
+        _clean_z_image_text(term).lower()
+        for term in terms
+        if _clean_z_image_text(term) and not _is_anima_fallback_meta_term(term)
+    ]
     return _sentence_from_terms(cleaned[:4], "a clearly defined anime figure")
 
 
+def _is_anima_fallback_meta_term(term):
+    clean = _clean_z_image_text(term).lower()
+    compact = re.sub(r"[^a-z0-9]+", "_", clean).strip("_")
+    if not compact:
+        return True
+    if compact.isdigit():
+        return True
+    if re.fullmatch(r"score_\d+(?:_up)?", compact):
+        return True
+    return compact in ANIMA_FALLBACK_META_TERMS or clean in ANIMA_FALLBACK_META_TERMS
+
+
+def _anima_visual_fallback_terms(terms):
+    return [term for term in terms if not _is_anima_fallback_meta_term(term)]
+
+
 def _anima_foreground_fallback(foreground_terms, source_terms):
-    subject = _anima_subject_phrase(foreground_terms or source_terms)
-    objects = _anima_subject_phrase((foreground_terms or source_terms)[4:8])
+    visual_terms = _anima_visual_fallback_terms(foreground_terms) or _anima_visual_fallback_terms(source_terms)
+    subject = _anima_subject_phrase(visual_terms)
+    objects = _anima_subject_phrase(visual_terms[4:8])
     return (
         f"The main figure is built around {subject}, with a clear and readable silhouette. "
         "The face has carefully shaped features, attentive eyes, and a focused direction of gaze. "
@@ -2002,7 +2059,8 @@ def _anima_foreground_fallback(foreground_terms, source_terms):
 
 
 def _anima_background_fallback(background_terms, source_terms):
-    setting = _anima_subject_phrase(background_terms or source_terms)
+    visual_terms = _anima_visual_fallback_terms(background_terms) or _anima_visual_fallback_terms(source_terms)
+    setting = _anima_subject_phrase(visual_terms)
     return (
         f"Around the figure, details such as {setting} create a setting with recognizable shapes and surfaces. "
         "Nearby props occupy the foreground and middle distance without hiding the main action. "
@@ -2034,18 +2092,23 @@ def _anima_prompt_parts(value, word_salad, style_anchor, provided=None):
     )
     source_terms = _curated_terms(combined_source, limit=48, filter_low_value=False)
     safety_tags = _anima_safety_tags(word_salad, style_anchor)
+    anchor_base_tags = _anima_style_anchor_base_tags(style_anchor)
 
-    base_tags = list(ANIMA_QUALITY_TAGS)
-    base_tags.extend(safety_tags)
-    base_tags.extend(_anima_anchor_style_tags(style_anchor, limit=5))
-    base_tags.extend(_tags_from_terms(style_terms[:5], limit=5))
-    base_tags.extend(ANIMA_BASE_STYLE_TAGS)
-    provided_base = _anima_tag_text(provided.get("base_prompt", ""), limit=8)
-    if provided_base:
-        base_tags.extend(provided_base.split(", "))
+    if anchor_base_tags:
+        base_tags = list(anchor_base_tags)
+        base_tags.extend(safety_tags)
+    else:
+        base_tags = list(ANIMA_QUALITY_TAGS)
+        base_tags.extend(safety_tags)
+        base_tags.extend(_anima_anchor_style_tags(style_anchor, limit=5))
+        base_tags.extend(_tags_from_terms(style_terms[:5], limit=5))
+        base_tags.extend(ANIMA_BASE_STYLE_TAGS)
+        provided_base = _anima_tag_text(provided.get("base_prompt", ""), limit=8)
+        if provided_base:
+            base_tags.extend(provided_base.split(", "))
     base_prompt = _anima_tag_text(
         base_tags,
-        limit=14,
+        limit=24 if anchor_base_tags else 14,
         fallback="masterpiece, best quality, score_9, score_8_up, score_7_up, anime illustration, clean linework",
     )
 
@@ -3068,8 +3131,10 @@ def _target_profile_instructions(target_profile, style_cluster):
 - Anima is an anime, illustration, and artistic image model. It is not a realism profile.
 - Write a natural English image description of about 180 to 260 words in total.
 - Use short, simple sentences, preferably 8 to 18 words each. Avoid long compound sentences.
-- base_prompt must be one compact comma-separated tag line beginning exactly with: masterpiece, best quality, score_9, score_8_up, score_7_up.
-- After those required tags, base_prompt may contain only a few useful safety, medium, lighting, style, and composition tags.
+- base_prompt must be one compact comma-separated tag line.
+- When a style anchor is provided, begin base_prompt exactly with that anchor and do not create a separate masterpiece/score/linework prefix.
+- When no style anchor is provided, begin base_prompt exactly with: masterpiece, best quality, score_9, score_8_up, score_7_up.
+- After the controlled prefix, base_prompt may contain only a few useful safety, medium, lighting, style, and composition tags.
 - Only include safe, sensitive, nsfw, explicit, or guro when one of those safety/content tags appears in the source text or style anchor. Do not add a default safety tag.
 - Use spaces instead of underscores in the base tags, except score tags such as score_9, score_8_up, score_7_up, score_6, score_1.
 - foreground_prompt must contain 5 to 7 short sentences and about 110 to 140 words.
@@ -3183,7 +3248,7 @@ Important:
 - Fill every JSON field with a useful non-empty string, except Z-Image negative which should be empty.
 - Negative fields must describe things to avoid, not repeat the positive prompt. For Z-Image only, negative must be an empty string.
 - Do not treat Pony v6 or Pony v7 as animal subjects.
-- For Anima, keep the required quality tags on the first line, then use 180 to 260 words of short natural sentences in subject-to-emotion order.
+- For Anima, keep the controlled base tag line first, then use 180 to 260 words of short natural sentences in subject-to-emotion order.
 - For Anima, do not use Pony v7/SDXL/Z-Image control language such as style_cluster_*, rating_explicit, or source_* tags.
 - Start your response with {{ and end it with }}.
 - Use exactly the requested JSON keys, with no markdown and no commentary.

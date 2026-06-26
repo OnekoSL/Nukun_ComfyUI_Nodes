@@ -82,6 +82,35 @@ class AnimaNaturalPromptTests(unittest.TestCase):
         self.assertNotIn("nsfw", safe_base)
         self.assertIn("nsfw", nsfw_base)
 
+    def test_style_anchor_controls_anima_base_prefix(self):
+        anchor = "masterpiece, best quality, anime illustration, cinematic lighting, clean linework, detailed materials"
+        positive, _, _, base, _, _ = anima_result(
+            "A red-haired woman stands beside a tiled wall.",
+            "Cool room light falls across simple wall tiles. The mood feels tense.",
+            word_salad="red hair tiled wall nsfw explicit",
+            style_anchor=anchor,
+        )
+        self.assertTrue(base.startswith(anchor))
+        self.assertIn("nsfw", base)
+        self.assertIn("explicit", base)
+        self.assertNotIn("score_9", base)
+        self.assertEqual(base.count("masterpiece"), 1)
+        self.assertEqual(base.count("best quality"), 1)
+        self.assertEqual(base.count("clean linework"), 1)
+        self.assertTrue(positive.startswith(base + "\n\n"))
+
+    def test_anima_fallback_does_not_turn_meta_tags_into_subject(self):
+        positive = anima_result(
+            "",
+            "",
+            word_salad="year 1988 newest nsfw explicit young woman long red hair blue bandana tiled wall ropes",
+            style_anchor="masterpiece, best quality, anime illustration, clean linework",
+        )[0]
+        self.assertIn("built around young, woman, long, and red", positive)
+        self.assertNotIn("built around year", positive)
+        self.assertNotIn("year, newest, nsfw", positive)
+        self.assertNotIn("nsfw, and explicit, with a clear", positive)
+
     def test_other_profile_instructions_remain_profile_specific(self):
         self.assertIn("Write tag tokens only", refiner._target_profile_instructions("pony_v6", 430))
         self.assertIn("360 to 440 words", refiner._target_profile_instructions("z_image", 430))
