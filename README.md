@@ -73,6 +73,7 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunUniversalNoiseSampler` - display name `Universal Noise Sampler (Nukun)`, category `Nukun/Sampling`
 - `NukunUniversalNoiseSamplerAdvanced` - display name `Universal Noise Sampler Advanced (Nukun)`, category `Nukun/Sampling`
 - `NukunNoiseProfileCycler` - display name `Noise Profile Cycler (Nukun)`, category `Nukun/Sampling`
+- `NukunSpeedSampler` - display name `SPEED Sampler (Nukun)`, category `Nukun/Sampling`
 - `NukunUNetBlockNoisePatch` - display name `UNet Block Noise Patch (Nukun)`, category `Nukun/Model Patches`
 - `NukunHiResFixTiled` - display name `HiResFix Tiled (Nukun)`, category `Nukun/Sampling`
 - `NukunTiledHiResFixAdvanced` - display name `Tiled HiRes Fix Advanced (Nukun)`, category `Nukun/Sampling`
@@ -337,6 +338,23 @@ For a continuity handoff that should stay close to a single full pass, add noise
 Do not set the next pass to `previous end_at_step + 1`; that skips the shared handoff sigma and changes the trajectory.
 Intentional later-pass noise reinjection is still useful for creative texture shifts, but it is not an equivalence test against a single sampler pass.
 Multistep samplers such as `deis_2m` may still differ after splitting because their internal step history restarts at each ranged pass. If a different sampler matches without overlap, keep the clean `N..M` handoff. For history-sensitive multistep samplers, use a small warmup overlap such as `0..20`, `18..30`, `28..10000` to get closer to the single-pass image.
+
+## SPEED Sampler
+
+`SPEED Sampler (Nukun)` outputs a `SAMPLER` for `SamplerCustomAdvanced`.
+It is based on the MIT-licensed `howardhx/speed` implementation of Spectral Progressive Diffusion for Efficient Image and Video Generation: https://github.com/howardhx/speed
+SPEED starts denoising at a lower latent resolution and spectrally expands to full resolution during the trajectory, which can reduce runtime when the model tolerates the resolution jumps.
+Use it when a workflow is sampler-bound and you can inspect results for artifacts; use a normal sampler when exact stability matters more than speed.
+
+Recommended starting points:
+- General/FLUX: `transform=dct`, `mode=delta_optimal`, `model_preset=flux`, `scales=0.5,1.0`, `delta=0.01`.
+- WAN 2.1-style experiments: same settings with `model_preset=wan21`.
+- Anima/manual experiments: `mode=manual`, `model_preset=anima_manual`, `scales=0.5,0.75,1.0`, `manual_sigmas=0.8,0.7`.
+
+`dct` is the safest transform for arbitrary scale ratios.
+`fft` also accepts arbitrary ratios.
+`dwt` requires each adjacent scale jump to be exactly `2x`, such as `0.25,0.5,1.0`.
+This node is self-contained in Nukun and does not require installing the separate `ComfyUI-SPEED` custom node package.
 
 ## Noise Profile Cycler
 

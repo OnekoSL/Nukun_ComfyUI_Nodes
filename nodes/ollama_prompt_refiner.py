@@ -481,6 +481,8 @@ def _available_ollama_models(ollama_url=DEFAULT_OLLAMA_URL):
 def _register_routes():
     if web is None or PromptServer is None:
         return
+    if not hasattr(PromptServer, "instance") or PromptServer.instance is None:
+        return
 
     routes = PromptServer.instance.routes
 
@@ -1942,8 +1944,56 @@ def _anima_prose_is_usable(value):
     return sentence_count >= 2 and text.count(",") <= max(10, _word_count(text) // 5)
 
 
+ANIMA_META_PROSE_PATTERN = re.compile(
+    r"\b(?:json|field|value|user|instruction|prompt|candidate|fallback|template|"
+    r"word salad|source words|source terms|negative prompt|base prompt|foreground prompt|"
+    r"background prompt|danbooru|tag list|keyword chain)\b",
+    re.IGNORECASE,
+)
+
+
+ANIMA_VISUAL_PROSE_PATTERN = re.compile(
+    r"\b(?:figure|subject|person|woman|man|girl|boy|face|eyes|hair|hand|body|pose|"
+    r"wearing|holds?|rests?|stands?|sits?|walks?|looks?|smiles?|expression|"
+    r"light|shadow|color|texture|surface|object|prop|room|street|beach|ocean|"
+    r"sky|city|tree|water|sand|background|environment|scene|camera|silhouette)\b",
+    re.IGNORECASE,
+)
+
+
+def _anima_ai_prose_is_usable(value):
+    text = _clean_anima_prose(value)
+    if not _anima_prose_is_usable(text):
+        return False
+    if ANIMA_META_PROSE_PATTERN.search(text):
+        return False
+    return bool(ANIMA_VISUAL_PROSE_PATTERN.search(text))
+
+
 def _anima_sentences(value):
     return [part.strip() for part in re.split(r"(?<=[.!?])\s+", _clean_anima_prose(value)) if part.strip()]
+
+
+def _trim_anima_prose_to_max_words(value, max_words):
+    sentences = _anima_sentences(value)
+    if not sentences:
+        return ""
+    fitted = []
+    for sentence in sentences:
+        candidate = " ".join((*fitted, sentence))
+        if fitted and _word_count(candidate) > max_words:
+            break
+        if not fitted and _word_count(sentence) > max_words:
+            words = sentence.split()
+            return " ".join(words[:max_words]).rstrip(" ,.;:-") + "."
+        fitted.append(sentence)
+    return " ".join(fitted)
+
+
+def _fit_anima_prose_ai_first(value, fallback, min_words, max_words):
+    if _anima_ai_prose_is_usable(value):
+        return _trim_anima_prose_to_max_words(value, max_words)
+    return _fit_anima_prose(value, fallback, min_words, max_words)
 
 
 def _fit_anima_prose(value, fallback, min_words, max_words):
@@ -2045,7 +2095,7 @@ def _anima_foreground_fallback(foreground_terms, source_terms):
     subject = _anima_subject_phrase(visual_terms)
     objects = _anima_subject_phrase(visual_terms[4:8])
     return (
-        f"The main figure is built around {subject}, with a clear and readable silhouette. "
+        f"The main figure reflects {subject} through a clear and readable silhouette. "
         "The face has carefully shaped features, attentive eyes, and a focused direction of gaze. "
         "Hair, skin, fur, or other visible surfaces carry distinct color and fine texture. "
         "Clothing and accessories use believable layers, visible seams, firm edges, and material contrast. "
@@ -2068,8 +2118,31 @@ def _anima_background_fallback(background_terms, source_terms):
         "A visible light source creates clean highlights, readable shadows, and a controlled color palette. "
         "Distant forms become softer and smaller, giving the illustration clear depth and atmosphere. "
         "Air, mist, dust, reflections, or weather connect the figure naturally with the surrounding space. "
-        "The final mood joins the figure's expression with the light, color, and stillness of the environment. "
-        "The scene should feel emotionally specific, visually coherent, and quietly memorable."
+        "The atmosphere connects the figure's expression with the light, color, and stillness of the environment. "
+        "Specific visual choices keep the image coherent, personal, and quietly memorable."
+    )
+
+
+def _anima_base_prompt_from_provided(provided_base, word_salad, style_anchor, style_terms):
+    safety_tags = _anima_safety_tags(word_salad, style_anchor)
+    anchor_base_tags = _anima_style_anchor_base_tags(style_anchor)
+    if anchor_base_tags:
+        base_tags = [*anchor_base_tags, *safety_tags]
+        return _anima_tag_text(base_tags, limit=24, fallback=", ".join(anchor_base_tags))
+
+    provided_tags = _anima_tag_text(provided_base, limit=14)
+    base_tags = list(ANIMA_QUALITY_TAGS)
+    base_tags.extend(safety_tags)
+    if provided_tags:
+        base_tags.extend(provided_tags.split(", "))
+    else:
+        base_tags.extend(_anima_anchor_style_tags(style_anchor, limit=5))
+        base_tags.extend(_tags_from_terms(style_terms[:3], limit=3))
+        base_tags.extend(ANIMA_BASE_STYLE_TAGS)
+    return _anima_tag_text(
+        base_tags,
+        limit=14,
+        fallback="masterpiece, best quality, score_9, score_8_up, score_7_up",
     )
 
 
@@ -2091,29 +2164,15 @@ def _anima_prompt_parts(value, word_salad, style_anchor, provided=None):
         value,
     )
     source_terms = _curated_terms(combined_source, limit=48, filter_low_value=False)
-    safety_tags = _anima_safety_tags(word_salad, style_anchor)
-    anchor_base_tags = _anima_style_anchor_base_tags(style_anchor)
-
-    if anchor_base_tags:
-        base_tags = list(anchor_base_tags)
-        base_tags.extend(safety_tags)
-    else:
-        base_tags = list(ANIMA_QUALITY_TAGS)
-        base_tags.extend(safety_tags)
-        base_tags.extend(_anima_anchor_style_tags(style_anchor, limit=5))
-        base_tags.extend(_tags_from_terms(style_terms[:5], limit=5))
-        base_tags.extend(ANIMA_BASE_STYLE_TAGS)
-        provided_base = _anima_tag_text(provided.get("base_prompt", ""), limit=8)
-        if provided_base:
-            base_tags.extend(provided_base.split(", "))
-    base_prompt = _anima_tag_text(
-        base_tags,
-        limit=24 if anchor_base_tags else 14,
-        fallback="masterpiece, best quality, score_9, score_8_up, score_7_up, anime illustration, clean linework",
+    base_prompt = _anima_base_prompt_from_provided(
+        provided.get("base_prompt", ""),
+        word_salad,
+        style_anchor,
+        style_terms,
     )
 
     foreground_fallback = _anima_foreground_fallback(foreground_terms, source_terms)
-    foreground_prompt = _fit_anima_prose(
+    foreground_prompt = _fit_anima_prose_ai_first(
         provided.get("foreground_prompt", ""),
         foreground_fallback,
         *ANIMA_FOREGROUND_WORD_RANGE,
@@ -2121,17 +2180,18 @@ def _anima_prompt_parts(value, word_salad, style_anchor, provided=None):
 
     background_fallback = _anima_background_fallback(background_terms, all_terms or source_terms)
     provided_background = provided.get("background_prompt", "")
-    background_prompt = _fit_anima_prose(
+    background_prompt = _fit_anima_prose_ai_first(
         provided_background,
         background_fallback,
         *ANIMA_BACKGROUND_WORD_RANGE,
     )
-    background_prompt = _ensure_anima_emotional_ending(
-        background_prompt,
-        provided_background,
-        background_fallback,
-        *ANIMA_BACKGROUND_WORD_RANGE,
-    )
+    if not _anima_ai_prose_is_usable(provided_background):
+        background_prompt = _ensure_anima_emotional_ending(
+            background_prompt,
+            provided_background,
+            background_fallback,
+            *ANIMA_BACKGROUND_WORD_RANGE,
+        )
 
     return base_prompt, foreground_prompt, background_prompt
 
@@ -3131,6 +3191,7 @@ def _target_profile_instructions(target_profile, style_cluster):
 - Anima is an anime, illustration, and artistic image model. It is not a realism profile.
 - Write a natural English image description of about 180 to 260 words in total.
 - Use short, simple sentences, preferably 8 to 18 words each. Avoid long compound sentences.
+- Your text will be used mostly as-is. Do not rely on local cleanup, expansion, or rewriting.
 - base_prompt must be one compact comma-separated tag line.
 - When a style anchor is provided, begin base_prompt exactly with that anchor and do not create a separate masterpiece/score/linework prefix.
 - When no style anchor is provided, begin base_prompt exactly with: masterpiece, best quality, score_9, score_8_up, score_7_up.
@@ -3142,7 +3203,10 @@ def _target_profile_instructions(target_profile, style_cluster):
 - background_prompt must contain 4 to 6 short sentences and about 70 to 90 words.
 - Begin background_prompt with nearby objects and the visible setting. Continue with architecture or terrain, light sources, color, atmosphere, and depth.
 - End background_prompt with the figure's emotional expression, body language, and the emotional effect of the whole scene.
+- Preserve source concepts while turning them into coherent visual prose. Do not echo candidate-list names or discarded words as a template.
+- Do not write phrases like "built around", "final mood joins", "the scene should feel", or generic template language.
 - Write concrete visual prose, not a Danbooru tag list, keyword chain, instruction, or wish list.
+- Do not include field labels inside values.
 - Do not use Pony v7 controls such as rating_explicit, style_cluster_*, source_* tags, or a rating/style_cluster header.
 - negative should include Anima-appropriate quality/anatomy/artifact negatives and must not repeat the positive prompt."""
     if target_profile == "z_image":
@@ -3210,11 +3274,20 @@ background_prompt => {background_prompt}
 negative => low quality worst quality bad anatomy bad hands malformed fingers poorly drawn face text watermark logo blurry
 report => Built an Illustrious split prompt from sorted visual candidates."""
     if target_profile == "anima":
-        base, foreground_prompt, background_prompt = _anima_prompt_parts(
-            "",
-            word_salad,
-            style_anchor,
-            {"base_prompt": _anima_tag_text([*fixed_base[:12], *style[:3], "anime_illustration", "digital_art"])},
+        base = _anima_tag_text(
+            [*fixed_base[:8], *style[:2], "anime illustration", "digital art"],
+            limit=12,
+            fallback="masterpiece, best quality, score_9, score_8_up, score_7_up, anime illustration",
+        )
+        foreground_prompt = (
+            "A copper-haired archivist stands beside a rain-streaked window and studies a small blue crystal. "
+            "Her coat has worn leather seams, silver buttons, and damp fabric edges. "
+            "She holds the crystal close to her chest while her careful smile shows quiet curiosity."
+        )
+        background_prompt = (
+            "A narrow workshop surrounds her with brass tools, glass jars, and stacked field notes. "
+            "Warm lamplight crosses the wooden table and fades into the rainy city outside. "
+            "The calm light makes her focused expression feel private and memorable."
         )
         return f"""Example field values for Anima using the current candidates only:
 base_prompt => {base}
@@ -3250,6 +3323,8 @@ Important:
 - Do not treat Pony v6 or Pony v7 as animal subjects.
 - For Anima, keep the controlled base tag line first, then use 180 to 260 words of short natural sentences in subject-to-emotion order.
 - For Anima, do not use Pony v7/SDXL/Z-Image control language such as style_cluster_*, rating_explicit, or source_* tags.
+- For Anima, your foreground_prompt and background_prompt should be final usable prose, not placeholders for later rewriting.
+- For Anima, do not include labels, candidate-list headings, "built around", "final mood joins", or "the scene should feel" inside JSON values.
 - Start your response with {{ and end it with }}.
 - Use exactly the requested JSON keys, with no markdown and no commentary.
 - Required JSON keys: {", ".join(RESPONSE_KEYS)}.
