@@ -1,6 +1,7 @@
 from .noise_sampler_core import (
     MAX_SEED,
     PONY_V7_PROFILES,
+    PREVIEW_METHODS,
     NukunCompositeNoise,
     NukunEmptyNoise,
     sample_custom_advanced,
@@ -80,6 +81,13 @@ class NukunPonyV7NoiseSampler:
                         "tooltip": "Lower values emphasize larger forms; higher values emphasize texture, color, and line variation.",
                     },
                 ),
+                "preview_method": (
+                    PREVIEW_METHODS,
+                    {
+                        "default": "default",
+                        "tooltip": "Per-node latent preview override. default follows ComfyUI; latent2rgb is lightweight; none disables previews.",
+                    },
+                ),
             },
         }
 
@@ -101,6 +109,7 @@ class NukunPonyV7NoiseSampler:
         v7_profile="stage1_gaussian",
         noise_strength=0.55,
         detail_bias=0.35,
+        preview_method="default",
     ):
         if add_noise:
             noise = NukunPonyV7CompositeNoise(
@@ -113,7 +122,15 @@ class NukunPonyV7NoiseSampler:
         else:
             noise = NukunEmptyNoise()
 
-        return sample_custom_advanced(guider, sampler, sigmas, latent_image, noise, noise_seed)
+        return sample_custom_advanced(
+            guider,
+            sampler,
+            sigmas,
+            latent_image,
+            noise,
+            noise_seed,
+            preview_method=preview_method,
+        )
 
 
 NODE_CLASS_MAPPINGS = {

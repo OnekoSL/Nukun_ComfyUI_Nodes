@@ -10,6 +10,7 @@ These workflows are curated examples for the current Nukun node set. They are co
 - `nukun_example_04_hiresfix_tiled.json` - optional companion example with first-pass generation followed by `NukunHiResFixTiled`.
 - `nukun_example_05_unet_block_noise_lab.json` - baseline versus conservative `NukunUNetBlockNoisePatch` branch using `NukunCheckpointPairCyclerLoader`.
 - `nukun_example_06_controlled_noise_stages_unet_patch.json` - three ranged `Universal Noise Sampler Advanced` passes with mild UNet block noise modulation. This is a creative reinjection workflow, not an equivalence test: later passes intentionally add fresh low-strength noise for staged texture changes. It is the best starting point for trying expanded profiles such as `pyramid_mix`, `green_test`, `rainbow_mild`, and `wavelet` at controlled strengths.
+- `nukun_example_07_simple_universal_ksampler.json` - simple text-to-image graph using `Universal KSampler (Nukun)` so users do not need to wire `CFGGuider`, `KSamplerSelect`, or `BasicScheduler` by hand.
 
 ## Optional Companion Nodes
 

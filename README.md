@@ -291,6 +291,8 @@ Disabling `add_noise` still produces zero noise and ignores the selected noise t
 The `seed` output exposes the final `noise_seed` value for filenames, logging, or downstream helper nodes.
 The expanded profiles are Sonar-inspired but implemented directly in Nukun; they do not require `ComfyUI-sonar`.
 `green_test`, `rainbow_intense`, `velvet`, and `wavelet` are stronger experimental profiles and are usually easier to control in partial denoise or multi-stage Advanced Sampler passes.
+All Nukun sampler nodes include `preview_method`: `default` follows ComfyUI's queue setting, `latent2rgb` gives a lightweight per-step latent preview, `taesd` uses TAESD/TAEHV preview assets when available, and `none` disables previews.
+For low-memory testers, set `preview_method = latent2rgb` so they can cancel the queue early when the first previews are off target.
 
 ## Illustrious Noise Sampler
 
@@ -317,6 +319,13 @@ Composite profiles include `illustrious_balanced`, `illustrious_texture`, `illus
 `noise_strength` scales every profile; `detail_bias` only affects composite profiles.
 Use `gaussian` + `auto` + `1.0` for the stable ComfyUI-core-like baseline, or Pony v7 profiles around `0.55` and `0.50` for the two-pass Pony v7 workflow.
 The Sonar-inspired expanded profiles are dependency-free Nukun implementations. Use the more expressive profiles, especially `green_test`, `rainbow_intense`, `velvet`, and `wavelet`, at lower strengths or in later ranged passes when you want localized texture or style shifts.
+
+## Universal KSampler
+
+`Universal KSampler (Nukun)` is the simple path for users who want a familiar KSampler-shaped node.
+Connect loader and conditioning outputs directly: `MODEL`, positive `CONDITIONING`, negative `CONDITIONING`, and `LATENT` go into `Universal KSampler (Nukun)`, then send its `output` latent to VAE decode.
+The node builds the CFG guider, sampler selection, and scheduler internally, while keeping the same Universal noise profiles and `preview_method` control.
+Use the advanced path when you need explicit graph control: `CFGGuider` + `KSamplerSelect` + `BasicScheduler` feed `Universal Noise Sampler (Nukun)`.
 
 ## Universal Noise Sampler Advanced
 

@@ -42,6 +42,7 @@ UNIVERSAL_NOISE_PROFILES = (
     + [f"illustrious_{mode}" for mode in ILLUSTRIOUS_MODES]
     + [f"pony_v7_{profile}" for profile in PONY_V7_PROFILES]
 )
+PREVIEW_METHODS = ["default", "latent2rgb", "taesd", "none"]
 SPECTRAL_NOISE_ALPHA = {
     "brown": 2.0,
     "pink": 1.0,
@@ -154,6 +155,7 @@ def sample_custom_advanced(
     start_at_step=0,
     end_at_step=10000,
     return_with_leftover_noise="disable",
+    preview_method="default",
 ):
     latent = latent_image
     latent_samples = latent["samples"]
@@ -182,19 +184,26 @@ def sample_custom_advanced(
         noise_mask = latent["noise_mask"]
 
     x0_output = {}
-    callback = latent_preview.prepare_callback(guider.model_patcher, sigmas.shape[-1] - 1, x0_output)
+    override_preview = preview_method not in (None, "", "default")
+    if override_preview:
+        latent_preview.set_preview_method(preview_method)
+    try:
+        callback = latent_preview.prepare_callback(guider.model_patcher, sigmas.shape[-1] - 1, x0_output)
 
-    disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
-    samples = guider.sample(
-        noise.generate_noise(latent),
-        latent_samples,
-        sampler,
-        sigmas,
-        denoise_mask=noise_mask,
-        callback=callback,
-        disable_pbar=disable_pbar,
-        seed=noise_seed,
-    )
+        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+        samples = guider.sample(
+            noise.generate_noise(latent),
+            latent_samples,
+            sampler,
+            sigmas,
+            denoise_mask=noise_mask,
+            callback=callback,
+            disable_pbar=disable_pbar,
+            seed=noise_seed,
+        )
+    finally:
+        if override_preview:
+            latent_preview.set_preview_method(None)
     samples = samples.to(comfy.model_management.intermediate_device())
 
     out = latent.copy()

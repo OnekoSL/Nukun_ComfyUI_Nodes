@@ -1,6 +1,7 @@
 from .noise_sampler_core import (
     MAX_SEED,
     NOISE_TYPES,
+    PREVIEW_METHODS,
     NukunEmptyNoise,
     NukunRandomNoise,
     generate_nukun_noise_for_tensor,
@@ -60,6 +61,13 @@ class NukunAdvancedNoiseSampler:
                         "tooltip": "Multiplier applied to generated noise. 1.0 keeps the selected noise type unchanged.",
                     },
                 ),
+                "preview_method": (
+                    PREVIEW_METHODS,
+                    {
+                        "default": "default",
+                        "tooltip": "Per-node latent preview override. default follows ComfyUI; latent2rgb is lightweight; none disables previews.",
+                    },
+                ),
             },
         }
 
@@ -80,13 +88,22 @@ class NukunAdvancedNoiseSampler:
         noise_device,
         noise_type="gaussian",
         noise_strength=1.0,
+        preview_method="default",
     ):
         if add_noise:
             noise = NukunRandomNoise(noise_seed, noise_device, noise_type, noise_strength)
         else:
             noise = NukunEmptyNoise()
 
-        return sample_custom_advanced(guider, sampler, sigmas, latent_image, noise, noise_seed)
+        return sample_custom_advanced(
+            guider,
+            sampler,
+            sigmas,
+            latent_image,
+            noise,
+            noise_seed,
+            preview_method=preview_method,
+        )
 
 
 NODE_CLASS_MAPPINGS = {

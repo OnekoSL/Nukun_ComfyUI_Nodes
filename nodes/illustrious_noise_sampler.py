@@ -1,6 +1,7 @@
 from .noise_sampler_core import (
     ILLUSTRIOUS_MODES as VARIATION_MODES,
     MAX_SEED,
+    PREVIEW_METHODS,
     NukunCompositeNoise,
     NukunEmptyNoise,
     sample_custom_advanced,
@@ -81,6 +82,13 @@ class NukunIllustriousNoiseSampler:
                         "tooltip": "Lower values emphasize larger forms; higher values emphasize texture and micro detail.",
                     },
                 ),
+                "preview_method": (
+                    PREVIEW_METHODS,
+                    {
+                        "default": "default",
+                        "tooltip": "Per-node latent preview override. default follows ComfyUI; latent2rgb is lightweight; none disables previews.",
+                    },
+                ),
             },
         }
 
@@ -102,6 +110,7 @@ class NukunIllustriousNoiseSampler:
         variation_mode="balanced",
         variation_strength=1.0,
         detail_bias=0.35,
+        preview_method="default",
     ):
         if add_noise:
             noise = NukunIllustriousCompositeNoise(
@@ -114,7 +123,15 @@ class NukunIllustriousNoiseSampler:
         else:
             noise = NukunEmptyNoise()
 
-        return sample_custom_advanced(guider, sampler, sigmas, latent_image, noise, noise_seed)
+        return sample_custom_advanced(
+            guider,
+            sampler,
+            sigmas,
+            latent_image,
+            noise,
+            noise_seed,
+            preview_method=preview_method,
+        )
 
 
 NODE_CLASS_MAPPINGS = {
