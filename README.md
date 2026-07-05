@@ -133,6 +133,8 @@ Connect the optional `chain` input to append generated words after an existing s
 
 `Multi Vocab String List (Nukun)` combines four selectable vocab files in one node. Each slot has its own `amount` and incrementable `word_index` cursor, so ComfyUI's control-after-generate menu can keep, increment, decrement, or randomize each slot independently. The node returns a combined string plus one output per slot.
 
+See [VOCAB_STRING_LIST_GUIDE.md](VOCAB_STRING_LIST_GUIDE.md) for a practical guide to using both vocab nodes.
+
 ## Ollama Prompt Refiner
 
 This node sends a random vocabulary string to a local Ollama model and returns one curated split prompt set for the selected `target_profile`: `pony_v6`, `illustrious`, `pony_v7`, `z_image`, `anima`, or `wan2_2_video`.
