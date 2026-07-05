@@ -123,11 +123,11 @@ It exposes one integer widget with ComfyUI's control-after-generate support and 
 
 ## Random Vocab String List
 
-This node reads a selected comma-separated plain-text word list and outputs a deterministic random space-separated string.
+This node reads a selected comma-separated plain-text word list and outputs a deterministic shuffle-bag space-separated string.
 It can use `ComfyUI/user/vocab.json` or bundled files such as `resources/english_words.csv`; add more `.csv`, `.txt`, or `.json` files to `resources/` to make them selectable.
-Set `amount` for the number of words and use the `seed` widget's control-after-generate behavior to keep, increment, decrement, or randomize selections between queued runs.
-Words are sampled without duplicates; if `amount` is larger than the available vocabulary, the output is clamped to the full list.
-Bundled category vocabularies include places/environments, objects, animals and mythical creatures, verbs, nouns, adjectives, `*ing` words, camera/composition terms, person names, countries, and cities.
+Set `amount` for the number of words and use the `seed` widget's control-after-generate behavior as a block cursor: incrementing walks through non-overlapping shuffled blocks before reshuffling, while randomizing jumps to another block.
+Words are deduplicated before sampling; if `amount` is larger than the available vocabulary, the output is clamped to the full list.
+Bundled category vocabularies include places/environments, objects, animals and mythical creatures, verbs, nouns, adjectives, `*ing` words, camera/composition terms, quality tags, person names, countries, and cities.
 Bundled Little Doom LoRA keyword resources are also available as `little_doom_*.csv`, including clean, character/source, visual feature, clothing, action, setting, style, mature, and dark/gore subsets.
 Connect the optional `chain` input to append generated words after an existing string and build prompt chains.
 

@@ -160,7 +160,7 @@ class NukunRandomVocabStringList:
                         "min": 0,
                         "max": 0xffffffffffffffff,
                         "control_after_generate": True,
-                        "tooltip": "Seed for deterministic random word selection. The frontend can change it after queueing.",
+                        "tooltip": "Shuffle-bag block cursor for deterministic random words. Increment this to walk the vocabulary without repeats before reshuffling.",
                     },
                 ),
             },
@@ -170,26 +170,26 @@ class NukunRandomVocabStringList:
     RETURN_NAMES = ("STRING",)
     FUNCTION = "generate"
     CATEGORY = "Nukun/Text"
-    DESCRIPTION = "Outputs a deterministic random space-separated word list from a selectable vocabulary file, optionally appended to an incoming string."
+    DESCRIPTION = "Outputs a deterministic shuffle-bag word list from a selectable vocabulary file, optionally appended to an incoming string."
 
     def generate(self, vocab_file, amount, seed, chain=""):
-        words = _load_words(vocab_file)
-        pick_count = min(int(amount), len(words))
-        selected = random.Random(int(seed)).sample(words, pick_count)
-        generated = " ".join(selected)
+        generated = _generate_slot(vocab_file, amount, seed, 1)
         chain = chain.strip()
-        if chain:
+        if chain and generated:
             return (f"{chain} {generated}",)
+        if chain:
+            return (chain,)
         return (generated,)
 
     @classmethod
-    def IS_CHANGED(cls, vocab_file, amount, seed):
+    def IS_CHANGED(cls, vocab_file, amount, seed, chain=""):
         try:
             path = _resolve_vocab_path(vocab_file)
         except RuntimeError:
             path = ""
 
         digest = hashlib.sha256()
+        digest.update(str(chain).encode("utf-8"))
         digest.update(str(vocab_file).encode("utf-8"))
         digest.update(str(int(amount)).encode("utf-8"))
         digest.update(str(int(seed)).encode("utf-8"))

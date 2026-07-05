@@ -17,6 +17,8 @@
 - Added Z-Image prompt refining support and bundled prompt-design reference notes.
 - Added Qwen-aware conditioning support for the T5 equal-length and sculpt balancer nodes.
 - Added `Multi Vocab String List (Nukun)` for combining four selectable vocabulary files with deterministic random fills and optional direct word selectors.
+- Updated `Random Vocab String List (Nukun)` to use the same deduplicated shuffle-bag selection as the multi-vocab node, so incrementing the seed walks non-overlapping blocks before reshuffling.
+- Added `resources/quality_tags.csv` for positive quality, detail, aesthetic, lighting, composition, and score prompt tags.
 - Added `resources/camera_composition.csv` for camera, framing, focus, perspective, and composition prompt terms.
 - Fixed `Ollama Prompt Refiner (Nukun)` model selection so installed Ollama models take priority and the dropdown refreshes from the selected Ollama URL.
 - Improved `Ollama Prompt Refiner (Nukun)` for Reka Flash GGUF models with a compact JSON-only prompt wrapper, fixed context-length choices, and stricter reasoning cleanup.

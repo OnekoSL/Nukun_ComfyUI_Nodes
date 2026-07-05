@@ -17,6 +17,33 @@ spec.loader.exec_module(vocab)
 
 
 class MultiVocabShuffleBagTests(unittest.TestCase):
+    def test_random_node_uses_shuffle_bag_blocks(self):
+        node = vocab.NukunRandomVocabStringList()
+        with patch.object(vocab, "_load_words", return_value=["alpha", "beta", "gamma", "delta"]):
+            first = node.generate("resources/test.txt", 2, 0)[0]
+            second = node.generate("resources/test.txt", 2, 1)[0]
+
+        words = first.split() + second.split()
+        self.assertEqual(len(words), 4)
+        self.assertEqual(set(words), {"alpha", "beta", "gamma", "delta"})
+
+    def test_random_node_dedupes_vocab_before_sampling(self):
+        node = vocab.NukunRandomVocabStringList()
+        with patch.object(vocab, "_load_words", return_value=["alpha", "beta", "alpha", "gamma", "beta", "delta"]):
+            first = node.generate("resources/test.txt", 2, 0)[0]
+            second = node.generate("resources/test.txt", 2, 1)[0]
+
+        words = first.split() + second.split()
+        self.assertEqual(len(words), 4)
+        self.assertEqual(len(words), len(set(words)))
+        self.assertEqual(set(words), {"alpha", "beta", "gamma", "delta"})
+
+    def test_random_node_is_changed_includes_chain(self):
+        first = vocab.NukunRandomVocabStringList.IS_CHANGED("resources/missing.txt", 2, 0, chain="alpha")
+        second = vocab.NukunRandomVocabStringList.IS_CHANGED("resources/missing.txt", 2, 0, chain="beta")
+
+        self.assertNotEqual(first, second)
+
     def test_word_index_amount_one_covers_bag_before_repeating(self):
         words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]
         picks = [vocab._shuffle_bag_sample(words, 1, word_index, 1)[0] for word_index in range(len(words))]
