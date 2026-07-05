@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.0
+## v0.6.0
 
 - Added a Wan 2.2 TI2V-5B toolkit with validated video settings, cable-free T2V/I2V latent switching, proportional image preparation, and reproducible run manifests.
 - Added the `wan2_2_video` Ollama profile with temporal action, camera, environment, and video-artifact guidance.
@@ -12,19 +12,25 @@
 - Added `4-Prompt Model Cycler Loader (Nukun)` for synchronized four-prompt-per-UNET folder cycles with `increment`, `fixed`, and frontend-randomized model-synchronous seed modes.
 - Added `4-Prompt Checkpoint Cycler Loader (Nukun)` with the same prompt and seed cycles for normal checkpoints with embedded CLIP and VAE outputs.
 - Fixed both 4-prompt cyclers so ComfyUI's automatic seed randomizer is locked to `fixed`; `seed_mode` is now the only seed controller.
+- Added `Ollama Vision Captioner (Nukun)` with natural caption, Danbooru tag, Pony source, refiner seed, and HiResFix text outputs.
+- Added Anima prompt-refiner support, Anima/Wan workflows, and expanded Anima prompt ordering.
+- Added `Pixel Anchored Remaster (Nukun)`, `SPEED Sampler (Nukun)`, sampler preview controls, and `Universal KSampler (Nukun)`.
+- Replaced `Multi Vocab String List (Nukun)` direct word selectors with per-slot cursor controls and added the practical vocab usage guide.
+- Added Anima2B artist, quality tag, expression style, and hair style vocabulary resources, and normalized bundled CSV entries so entries do not start with spaces.
+- Updated `Random Vocab String List (Nukun)` to use the same deduplicated shuffle-bag selection as the multi-vocab node, so incrementing the seed walks non-overlapping blocks before reshuffling.
+
+## v0.5.0
+
 - Added `Ollama Prompt Refiner (Nukun)` for local Ollama-based split prompt generation with selectable `pony_v6`, `illustrious`, `pony_v7`, and `z_image` target profiles.
 - Added split prompt outputs for `positive`, `negative`, `report`, `base_prompt`, `foreground_prompt`, and `background_prompt`.
 - Added Z-Image prompt refining support and bundled prompt-design reference notes.
 - Added Qwen-aware conditioning support for the T5 equal-length and sculpt balancer nodes.
 - Added `Multi Vocab String List (Nukun)` for combining four selectable vocabulary files with deterministic random fills and optional direct word selectors.
-- Updated `Random Vocab String List (Nukun)` to use the same deduplicated shuffle-bag selection as the multi-vocab node, so incrementing the seed walks non-overlapping blocks before reshuffling.
-- Added `resources/quality_tags.csv` for positive quality, detail, aesthetic, lighting, composition, and score prompt tags.
 - Added `resources/camera_composition.csv` for camera, framing, focus, perspective, and composition prompt terms.
 - Fixed `Ollama Prompt Refiner (Nukun)` model selection so installed Ollama models take priority and the dropdown refreshes from the selected Ollama URL.
 - Improved `Ollama Prompt Refiner (Nukun)` for Reka Flash GGUF models with a compact JSON-only prompt wrapper, fixed context-length choices, and stricter reasoning cleanup.
 - Improved Pony v6 and Illustrious prompt refining with pre-sorted visual candidates and concrete 30-40 word background tag lists.
 - Changed `Ollama Prompt Refiner (Nukun)` to a single-target workflow; older workflows should reconnect to the new shared prompt outputs.
-- Expanded the Anima profile into 180-260 words of short natural sentences ordered from quality tags and main figure through objects, environment, and emotional atmosphere.
 
 ## v0.4.0
 
