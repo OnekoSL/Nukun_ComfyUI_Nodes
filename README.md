@@ -208,14 +208,15 @@ It also outputs raw token counts, the effective target, and a short text report 
 
 ## T5 Sculpt Equal-Length Prompt Balancer
 
-This experimental node keeps the equal-length T5 prompt encoding behavior, then optionally replaces eligible token IDs with sculpted T5 embedding vectors before scheduled encoding.
-It skips special/padded tokens, caches repeated token IDs per branch, and limits nearest-vector search with `top_k`.
+This experimental node keeps the equal-length T5 prompt encoding behavior, then optionally replaces eligible token IDs with sculpted T5/Qwen embedding vectors before scheduled encoding.
+It skips special, padded, and Qwen3-VL chat-template tokens, shares repeated token IDs across positive and negative prompts, and performs the exact `top_k` nearest-vector search in bounded chunks instead of cloning the complete embedding table to VRAM. The accelerator is used automatically; an accelerator OOM clears only temporary cache data and transparently retries the search on CPU. The report states the search device, fallback state, chunk size, query batches, and unique-token count.
 The defaults are mildly active for the positive prompt and normalization-only for the negative prompt, so compare against `T5 Equal-Length Prompt Balancer (Nukun)` before increasing intensity.
+Both equal-length nodes keep `target = 1024` as their default. On low-memory systems, set `target = 0` to equalize only to the longer real prompt instead of adding artificial 1024-token padding.
 
 ## CLIP Sculpt Text Encode
 
 This SD1/SDXL CLIP node is the Nukun-native replacement for the old external `CLIP Vector Sculptor text encode`.
-It tokenizes text, skips special and precomputed embedding tokens, sculpts eligible CLIP token vectors with cached `top_k` nearest-vector search, then encodes with ComfyUI's scheduled CLIP path.
+It tokenizes text, skips special and precomputed embedding tokens, sculpts eligible CLIP token vectors with the same exact chunked/CPU-fallback search, then encodes with ComfyUI's scheduled CLIP path. `mean of all tokens` is also calculated as a streaming chunk reduction and no longer materializes a full FP32 embedding copy.
 The old `Vector_Sculptor_ComfyUI` package is not patched, so older workflows can still load while new workflows can use `CLIP Sculpt Text Encode (Nukun)`.
 The companion conditioning nodes provide Nukun versions of slerp, average-keep-magnitude, normalize-to-empty, and SDXL CLIP G/L merge.
 
@@ -251,6 +252,7 @@ The `hiresfix_conditioning` output is encoded from all active text boxes plus `h
 
 This experimental SDXL/CLIP node keeps the same text assembly as `Regional Prompt Encoder (Nukun)`, then applies local Vector-Sculptor-style token embedding edits to the regional and HiRes conditionings.
 `base_conditioning` remains unsculpted as a stable global reference, and `conditioning_3` remains the unsculpted base fallback when `region_count = 2`.
+All active regional and HiRes texts are tokenized before sculpting, so each unique token is searched once per CLIP stream and reused across every regional conditioning with bounded memory.
 Use it when a regional workflow currently needs separate `CLIP Vector Sculptor text encode` chains after prompt composition.
 The defaults are mildly active: `forward`, intensity `0.5`, and `mean` token normalization.
 

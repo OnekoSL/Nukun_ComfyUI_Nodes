@@ -18,6 +18,7 @@
 - Replaced `Multi Vocab String List (Nukun)` direct word selectors with per-slot cursor controls and added the practical vocab usage guide.
 - Added Anima2B artist, quality tag, expression style, and hair style vocabulary resources, and normalized bundled CSV entries so entries do not start with spaces.
 - Updated `Random Vocab String List (Nukun)` to use the same deduplicated shuffle-bag selection as the multi-vocab node, so incrementing the seed walks non-overlapping blocks before reshuffling.
+- Reworked all T5/Qwen, CLIP, and regional sculpt nodes to use exact chunked nearest-token search with automatic CPU fallback, eliminating full FP32 embedding-table VRAM copies such as the 1.45 GiB Krea2/Qwen3-VL allocation spike.
 
 ## v0.5.0
 

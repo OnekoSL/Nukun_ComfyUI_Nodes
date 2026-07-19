@@ -2,6 +2,9 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
+
+import torch
 
 
 COMFY_ROOT = Path(__file__).resolve().parents[3]
@@ -15,6 +18,7 @@ from custom_nodes.Nukun_ComfyUI_Nodes.nodes.t5_equal_length_balancer import (
 from custom_nodes.Nukun_ComfyUI_Nodes.nodes.t5_sculpt_equal_length_balancer import (
     NukunT5SculptEqualLengthBalancer,
 )
+from custom_nodes.Nukun_ComfyUI_Nodes.nodes import embedding_sculpt_core as sculpt_core
 
 
 class FakeKreaClip:
@@ -33,6 +37,44 @@ class FakeKreaClip:
         target = self.options.get("qwen3vl_4b_min_length", 0)
         length = max(raw_length, target)
         return {"qwen3vl_4b": [[(token_id, 1.0) for token_id in range(length)]]}
+
+    def encode_from_tokens_scheduled(self, tokens):
+        return tokens
+
+
+class FakeSculptKreaClip:
+    def __init__(self, weight=None):
+        self.weight = weight if weight is not None else torch.randn(64, 8, generator=torch.Generator().manual_seed(7))
+        embedding = SimpleNamespace(weight=self.weight)
+        transformer = SimpleNamespace(get_input_embeddings=lambda: embedding)
+        self.cond_stage_model = SimpleNamespace(
+            qwen3vl_4b=SimpleNamespace(
+                transformer=transformer,
+                special_tokens={"start": 0, "end": 63, "pad": 1},
+            )
+        )
+        self.options = {}
+
+    def clone(self):
+        clone = FakeSculptKreaClip(self.weight)
+        clone.options = dict(self.options)
+        return clone
+
+    def set_tokenizer_option(self, name, value):
+        self.options[name] = value
+
+    def tokenize(self, text):
+        word_ids = [2 + (sum(word.encode("utf-8")) % 50) for word in text.split()]
+        batch = [
+            (151644, 1.0),
+            (872, 1.0),
+            (198, 1.0),
+            *[(token_id, 1.0) for token_id in word_ids],
+            (151645, 1.0),
+        ]
+        target = int(self.options.get("qwen3vl_4b_min_length", 0))
+        batch.extend([(1, 1.0)] * max(0, target - len(batch)))
+        return {"qwen3vl_4b": [batch]}
 
     def encode_from_tokens_scheduled(self, tokens):
         return tokens
@@ -98,6 +140,36 @@ class Qwen3VL4BBalancerTests(unittest.TestCase):
         )
 
         self.assertEqual(coords, [(0, 9, 2000), (0, 10, 2001)])
+
+    def test_positive_and_negative_share_one_low_memory_search(self):
+        node = NukunT5SculptEqualLengthBalancer()
+        with patch.object(
+            sculpt_core,
+            "chunked_top_neighbors",
+            wraps=sculpt_core.chunked_top_neighbors,
+        ) as search:
+            result = node.balance(
+                FakeSculptKreaClip(),
+                16,
+                "red fox crystal",
+                "blurred hands",
+                0.35,
+                "forward",
+                "none",
+                0.25,
+                "backward",
+                "mean",
+                4,
+            )
+
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(result[4], 16)
+        self.assertIn("search device:", result[-1])
+        self.assertIn("unique tokens:", result[-1])
+
+    def test_target_default_remains_1024(self):
+        target = NukunT5SculptEqualLengthBalancer.INPUT_TYPES()["required"]["target"]
+        self.assertEqual(target[1]["default"], 1024)
 
 
 if __name__ == "__main__":
