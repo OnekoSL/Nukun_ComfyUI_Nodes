@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.7.0
+
+- Added the `krea2` Ollama Prompt Refiner profile with subject-first natural-language prompts, exact preservation of visible quoted text, concrete spatial and material descriptions, and conservative negative prompts.
+- Aligned Krea2 and Z-Image prompt composition around a shared subject-to-aesthetic order while preserving their model-specific negative-prompt behavior and Krea2 style anchors.
+- Added Krea2 CLIP selection to the model cycler loaders and Krea2/Qwen stream detection plus chat-template exclusions to the T5 equal-length and sculpt balancers.
+- Reworked all T5/Qwen, CLIP, and regional sculpt nodes to use exact chunked nearest-token search with automatic CPU fallback, eliminating full FP32 embedding-table VRAM copies such as the 1.45 GiB Krea2/Qwen3-VL allocation spike.
+
 ## v0.6.0
 
 - Added a Wan 2.2 TI2V-5B toolkit with validated video settings, cable-free T2V/I2V latent switching, proportional image preparation, and reproducible run manifests.
@@ -18,7 +25,6 @@
 - Replaced `Multi Vocab String List (Nukun)` direct word selectors with per-slot cursor controls and added the practical vocab usage guide.
 - Added Anima2B artist, quality tag, expression style, and hair style vocabulary resources, and normalized bundled CSV entries so entries do not start with spaces.
 - Updated `Random Vocab String List (Nukun)` to use the same deduplicated shuffle-bag selection as the multi-vocab node, so incrementing the seed walks non-overlapping blocks before reshuffling.
-- Reworked all T5/Qwen, CLIP, and regional sculpt nodes to use exact chunked nearest-token search with automatic CPU fallback, eliminating full FP32 embedding-table VRAM copies such as the 1.45 GiB Krea2/Qwen3-VL allocation spike.
 
 ## v0.5.0
 
