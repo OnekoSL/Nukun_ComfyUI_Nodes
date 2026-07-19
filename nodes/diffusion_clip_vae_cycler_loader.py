@@ -1,6 +1,7 @@
 import os
 import re
 
+import comfy.model_base
 import folder_paths
 from nodes import CLIPLoader, UNETLoader, VAELoader
 
@@ -30,6 +31,8 @@ CLIP_TYPES = (
     "lens",
     "pixeldit",
     "ideogram4",
+    "boogu",
+    "krea2",
 )
 CLIP_DEVICES = ("default", "cpu")
 
@@ -69,6 +72,12 @@ def _preferred_name(names, preferred):
         if name.replace("\\", "/") == normalized_preferred:
             return name
     return names[0] if names else ""
+
+
+def _clip_type_for_model(model, clip_type):
+    if clip_type == "stable_diffusion" and isinstance(model.model, comfy.model_base.Krea2):
+        return "krea2"
+    return clip_type
 
 
 def _unet_names():
@@ -165,7 +174,9 @@ class NukunDiffusionClipVaeCyclerLoader:
         clip_device="default",
     ):
         model = UNETLoader().load_unet(unet_name, weight_dtype)[0]
-        clip = CLIPLoader().load_clip(clip_name, clip_type, clip_device)[0]
+        clip = CLIPLoader().load_clip(
+            clip_name, _clip_type_for_model(model, clip_type), clip_device
+        )[0]
         vae = VAELoader().load_vae(vae_name)[0]
         return (
             model,
