@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -9,6 +10,7 @@ if str(COMFY_ROOT) not in sys.path:
     sys.path.insert(0, str(COMFY_ROOT))
 
 from custom_nodes.Nukun_ComfyUI_Nodes.nodes import four_prompt_model_cycler_loader as cycler
+from custom_nodes.Nukun_ComfyUI_Nodes.nodes import diffusion_clip_vae_cycler_loader as combined_loader
 
 
 MODELS = [
@@ -137,6 +139,7 @@ class FourPromptModelCyclerTests(unittest.TestCase):
             patch.object(cycler, "UNETLoader", FakeUNETLoader),
             patch.object(cycler, "CLIPLoader", FakeCLIPLoader),
             patch.object(cycler, "VAELoader", FakeVAELoader),
+            patch.object(cycler, "_clip_type_for_model", side_effect=lambda model, clip_type: clip_type),
         ):
             result = cycler.NukunFourPromptModelCyclerLoader().load_models(
                 4,
@@ -162,6 +165,19 @@ class FourPromptModelCyclerTests(unittest.TestCase):
         self.assertNotIn("base_seed", inputs)
         self.assertEqual(inputs["seed_mode"][0], cycler.SEED_MODES)
         self.assertEqual(inputs["seed"][1]["control_after_generate"], "fixed")
+
+    def test_current_multimodal_clip_types_are_available(self):
+        self.assertIn("boogu", cycler.CLIP_TYPES)
+        self.assertIn("krea2", cycler.CLIP_TYPES)
+
+    def test_legacy_stable_diffusion_type_is_corrected_for_krea2(self):
+        class FakeKrea2:
+            pass
+
+        model = SimpleNamespace(model=FakeKrea2())
+        with patch.object(combined_loader.comfy.model_base, "Krea2", FakeKrea2):
+            self.assertEqual(cycler._clip_type_for_model(model, "stable_diffusion"), "krea2")
+            self.assertEqual(cycler._clip_type_for_model(model, "flux2"), "flux2")
 
 
 if __name__ == "__main__":

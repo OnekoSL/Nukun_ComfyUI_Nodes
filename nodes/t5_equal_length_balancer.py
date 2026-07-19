@@ -10,6 +10,7 @@ SUPPORTED_TEXT_STREAM_KEYS = (
     "qwen25_3b",
     "qwen3_2b",
     "qwen3_06b",
+    "qwen3vl_4b",
     "qwen3vl_8b",
 )
 

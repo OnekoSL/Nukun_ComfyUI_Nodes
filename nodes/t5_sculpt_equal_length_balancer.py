@@ -8,6 +8,10 @@ from .t5_equal_length_balancer import SUPPORTED_TEXT_STREAM_KEYS
 
 SCULPT_METHODS = ("forward", "backward", "maximum_absolute", "add_minimum_absolute")
 NORMALIZATION_MODES = ("none", "mean", "mean * attention")
+QWEN3VL_IM_START = 151644
+QWEN3VL_IM_END = 151645
+QWEN3VL_USER = 872
+QWEN3VL_NEWLINE = 198
 
 
 def maximum_absolute_values(tensors, reversed=False):
@@ -245,10 +249,32 @@ class NukunT5SculptEqualLengthBalancer:
         new_weight = new_weight * pre_mag / new_norm
         return new_weight.detach().cpu(), len(selected_weights)
 
+    def _qwen3vl_user_content_range(self, batch):
+        token_ids = [
+            int(entry[0]) if len(entry) >= 1 and isinstance(entry[0], numbers.Integral) else None
+            for entry in batch
+        ]
+        marker = (QWEN3VL_IM_START, QWEN3VL_USER, QWEN3VL_NEWLINE)
+        for index in range(len(token_ids) - len(marker) + 1):
+            if tuple(token_ids[index : index + len(marker)]) != marker:
+                continue
+            content_start = index + len(marker)
+            try:
+                content_end = token_ids.index(QWEN3VL_IM_END, content_start)
+            except ValueError:
+                return None
+            return content_start, content_end
+        return None
+
     def _eligible_entries(self, tokens, stream_key, special_ids):
         coords = []
         for batch_index, batch in enumerate(tokens[stream_key]):
+            content_range = None
+            if stream_key.startswith("qwen3vl_"):
+                content_range = self._qwen3vl_user_content_range(batch)
             for token_index, token_weight in enumerate(batch):
+                if content_range is not None and not content_range[0] <= token_index < content_range[1]:
+                    continue
                 if len(token_weight) < 2:
                     continue
                 token_id = token_weight[0]

@@ -19,15 +19,64 @@ OLLAMA_CONTEXT_LENGTH_CHOICES = ("2048", "4096", "8192", "16384", "32768", "6553
 DEFAULT_STYLE_CLUSTER = 430
 SPLIT_BASE_WORD_RANGE = (10, 20)
 SPLIT_DETAIL_WORD_RANGE = (36, 40)
-Z_IMAGE_POSITIVE_WORD_RANGE = (360, 440)
-Z_IMAGE_FOREGROUND_MIN_WORDS = 130
-Z_IMAGE_BACKGROUND_MIN_WORDS = 130
-Z_IMAGE_BASE_MIN_WORDS = 80
+Z_IMAGE_POSITIVE_WORD_RANGE = (300, 360)
+Z_IMAGE_BASE_WORD_RANGE = (55, 70)
+Z_IMAGE_FOREGROUND_WORD_RANGE = (140, 165)
+Z_IMAGE_BACKGROUND_WORD_RANGE = (105, 125)
+# Compatibility aliases for callers that inspected the former minimum constants.
+Z_IMAGE_FOREGROUND_MIN_WORDS = Z_IMAGE_FOREGROUND_WORD_RANGE[0]
+Z_IMAGE_BACKGROUND_MIN_WORDS = Z_IMAGE_BACKGROUND_WORD_RANGE[0]
+Z_IMAGE_BASE_MIN_WORDS = Z_IMAGE_BASE_WORD_RANGE[0]
 ANIMA_POSITIVE_WORD_RANGE = (180, 260)
 ANIMA_FOREGROUND_WORD_RANGE = (110, 140)
 ANIMA_BACKGROUND_WORD_RANGE = (70, 90)
-TARGET_PROFILES = ("pony_v6", "illustrious", "pony_v7", "z_image", "anima", "wan2_2_video")
+KREA2_POSITIVE_WORD_RANGE = (300, 360)
+KREA2_BASE_WORD_RANGE = (55, 70)
+KREA2_FOREGROUND_WORD_RANGE = (140, 165)
+KREA2_BACKGROUND_WORD_RANGE = (105, 125)
+NATURAL_SUBJECT_FIRST_GUIDANCE = """Shared subject-first content order for Krea 2 and Z-Image:
+- Begin directly with the main subject or central graphic element. Never begin with meta phrases such as \"In this image\", \"The image shows\", \"The photo shows\", or \"This image depicts\".
+- Move in this order: main subject; exact pose, action, gaze, and expression; appearance, hair, clothing, and surface details; props, materials, and textures; composition, framing, camera angle, perspective, focus, and spatial relationships; environment and background; lighting, color palette, atmosphere, and mood; overall medium and aesthetic.
+- State quantities, relative sizes, shapes, colors, body language, contact points, material response, wear, reflections, and positions precisely whenever they are relevant.
+- If legible text is requested, quote the exact text in double quotation marks and name the sign, screen, garment, page, label, or other surface carrying it.
+- Treat UI, posters, diagrams, and graphic design as visual subjects. Describe their central element first, then typography, color, relative size, decoration, and exact placement without switching to a separate output mode.
+- Write one or two cohesive paragraphs of vivid, readable English rather than a mechanical keyword list."""
+TARGET_PROFILES = ("pony_v6", "illustrious", "pony_v7", "z_image", "anima", "wan2_2_video", "krea2")
 DEFAULT_TARGET_PROFILE = "pony_v7"
+SPATIAL_TARGET_PROFILES = frozenset(("pony_v7", "z_image", "anima", "wan2_2_video", "krea2"))
+SPATIAL_INPUT_KEYS = ("left", "right", "top", "bottom")
+SPATIAL_DIRECTION_PATTERNS = {
+    "left": re.compile(
+        r"\b(?:(?:on|at|to|toward|towards|along|across)\s+(?:the\s+)?left(?:-hand)?(?:\s+side)?|"
+        r"(?:the\s+)?left(?:-hand)?\s+side|leftmost)\b",
+        re.IGNORECASE,
+    ),
+    "right": re.compile(
+        r"\b(?:(?:on|at|to|toward|towards|along|across)\s+(?:the\s+)?right(?:-hand)?(?:\s+side)?|"
+        r"(?:the\s+)?right(?:-hand)?\s+side|rightmost)\b",
+        re.IGNORECASE,
+    ),
+    "top": re.compile(
+        r"\b(?:(?:on|at|toward|towards|along|across)\s+(?:the\s+)?top|"
+        r"upper(?:most)?(?:\s+(?:part|area|edge|portion|half))?|above|overhead)\b",
+        re.IGNORECASE,
+    ),
+    "bottom": re.compile(
+        r"\b(?:(?:on|at|toward|towards|along|across)\s+(?:the\s+)?bottom|"
+        r"lower(?:most)?(?:\s+(?:part|area|edge|portion|half|foreground))?|below|beneath)\b",
+        re.IGNORECASE,
+    ),
+}
+SPATIAL_DIRECTION_WORDS = frozenset(
+    word
+    for words in (
+        ("left", "leftmost", "left-hand"),
+        ("right", "rightmost", "right-hand"),
+        ("top", "upper", "above", "overhead"),
+        ("bottom", "lower", "below", "beneath"),
+    )
+    for word in words
+)
 
 OUTPUT_KEYS = (
     "positive",
@@ -149,6 +198,22 @@ NEGATIVE_BASELINES = {
         "deformed hands",
         "duplicate subject",
         "camera shake",
+        "compression artifacts",
+    ),
+    "krea2": (
+        "worst quality",
+        "low quality",
+        "blurry",
+        "bad anatomy",
+        "bad hands",
+        "malformed fingers",
+        "extra fingers",
+        "missing fingers",
+        "duplicate subject",
+        "distorted geometry",
+        "unreadable text",
+        "watermark",
+        "logo",
         "compression artifacts",
     ),
 }
@@ -431,6 +496,7 @@ Rules:
 - Split the positive prompt into global model/style material, foreground subject detail, and background setting detail. For Z-Image, write natural descriptive prose instead of tags.
 - For Anima, begin with one compact quality-tag line, then write long natural English prose made of short simple sentences.
 - For Anima, order the prose from the main figure through appearance, action, and objects to environment, emotion, and atmosphere.
+- For Krea 2, write neutral natural-language image descriptions with explicit color, shape, size, quantity, material, texture, visible text, and spatial relationships where relevant.
 - Pony v6 and Pony v7 are model names, not subjects. Do not add a pony, horse, or equine character unless the input explicitly asks for one.
 - Do not invent copyrighted character names unless they appear in the input or style anchor.
 - If the input implies adult content, keep wording as neutral image-generation tags and do not add explicit acts.
@@ -655,6 +721,146 @@ def _normalize_target_profile(target_profile):
     return DEFAULT_TARGET_PROFILE
 
 
+def _spatial_values(left="", right="", top="", bottom=""):
+    return {
+        "left": str(left).strip(),
+        "right": str(right).strip(),
+        "top": str(top).strip(),
+        "bottom": str(bottom).strip(),
+    }
+
+
+def _spatial_context(target_profile, left="", right="", top="", bottom=""):
+    profile = _normalize_target_profile(target_profile)
+    if profile not in SPATIAL_TARGET_PROFILES:
+        return ""
+
+    values = _spatial_values(left, right, top, bottom)
+    labels = {
+        "left": "Left side",
+        "right": "Right side",
+        "top": "Top area",
+        "bottom": "Bottom area",
+    }
+    lines = [f'{labels[key]}: {values[key]}' for key in SPATIAL_INPUT_KEYS if values[key]]
+    if not lines:
+        return ""
+
+    pony_note = (
+        "\nFor Pony v7, use these hints only in the natural caption sections, not as control or Danbooru tags."
+        if profile == "pony_v7"
+        else ""
+    )
+    return (
+        "Spatial composition hints:\n"
+        + "\n".join(lines)
+        + "\nTreat these positions as creative composition guidance rather than rigid geometry. "
+        "Keep their broad orientation recognizable while allowing natural overlap, transitions, and visual balance. "
+        "The random word salad is global guidance and may influence every region."
+        + pony_note
+    )
+
+
+def _spatial_content_tokens(value):
+    tokens = []
+    seen = set()
+    for token in re.findall(r"[^\W_]+(?:-[^\W_]+)*", str(value).casefold(), re.UNICODE):
+        normalized = token.rstrip("s") if len(token) > 4 and token.endswith("s") else token
+        if (
+            len(normalized) < 3
+            or normalized in STOPWORDS
+            or normalized in SPATIAL_DIRECTION_WORDS
+            or normalized in seen
+        ):
+            continue
+        seen.add(normalized)
+        tokens.append(normalized)
+    return tokens
+
+
+def _spatial_sentences(value):
+    return [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(value))
+        if sentence.strip()
+    ]
+
+
+def _spatial_region_is_integrated(region, detail, result_text):
+    content_tokens = _spatial_content_tokens(detail)
+    if not content_tokens:
+        return False
+    required_matches = min(3, len(content_tokens))
+    direction_pattern = SPATIAL_DIRECTION_PATTERNS[region]
+    for sentence in _spatial_sentences(result_text):
+        if not direction_pattern.search(sentence):
+            continue
+        sentence_tokens = set(_spatial_content_tokens(sentence))
+        if sum(token in sentence_tokens for token in content_tokens) >= required_matches:
+            return True
+    return False
+
+
+def _spatial_fallback_text(
+    target_profile,
+    left="",
+    right="",
+    top="",
+    bottom="",
+    existing_text="",
+):
+    if _normalize_target_profile(target_profile) not in SPATIAL_TARGET_PROFILES:
+        return ""
+    values = _spatial_values(left, right, top, bottom)
+    prefixes = {
+        "left": "On the left",
+        "right": "On the right",
+        "top": "Across the top",
+        "bottom": "Along the bottom",
+    }
+    sentences = []
+    for key in SPATIAL_INPUT_KEYS:
+        if not values[key]:
+            continue
+        if existing_text and _spatial_region_is_integrated(key, values[key], existing_text):
+            continue
+        detail = re.sub(r"[\s.!?;,]+$", "", re.sub(r"\s+", " ", values[key])).strip()
+        if not detail:
+            continue
+        sentences.append(f"{prefixes[key]}, {detail}.")
+    return " ".join(sentences)
+
+
+def _apply_spatial_result(result, target_profile, left="", right="", top="", bottom=""):
+    _positive, negative, report, base_prompt, foreground_prompt, background_prompt = result
+    result_text = " ".join(
+        str(part).strip()
+        for part in (base_prompt, foreground_prompt, background_prompt)
+        if str(part).strip()
+    )
+    spatial_text = _spatial_fallback_text(
+        target_profile,
+        left,
+        right,
+        top,
+        bottom,
+        existing_text=result_text,
+    )
+    if not spatial_text:
+        return result
+
+    background_prompt = " ".join(
+        part for part in (spatial_text, str(background_prompt).strip()) if part
+    )
+    positive = _join_positive_parts(
+        target_profile,
+        base_prompt,
+        foreground_prompt,
+        background_prompt,
+    )
+    return positive, negative, report, base_prompt, foreground_prompt, background_prompt
+
+
 def _is_model_meta_term(normalized):
     compact = re.sub(r"[^a-z0-9]+", "_", str(normalized).lower()).strip("_")
     if re.fullmatch(r"pony_v?\d+", compact):
@@ -781,7 +987,7 @@ def _with_negative_baseline(target_profile, value):
 
 
 def _strip_commas_for_profile(target_profile, value):
-    if _normalize_target_profile(target_profile) in ("pony_v7", "z_image", "anima", "wan2_2_video"):
+    if _normalize_target_profile(target_profile) in ("pony_v7", "z_image", "anima", "wan2_2_video", "krea2"):
         return value
     return re.sub(r"\s+", " ", str(value).replace(",", " ")).strip()
 
@@ -935,6 +1141,7 @@ def _clean_report(report, target_profile, word_salad, style_anchor):
         "z_image": "Z-Image",
         "anima": "Anima",
         "wan2_2_video": "Wan 2.2 video",
+        "krea2": "Krea 2",
     }.get(_normalize_target_profile(target_profile), "selected profile")
     return f"Built one {profile_label} prompt from {core} and removed weak filler terms"
 
@@ -1000,6 +1207,19 @@ def _postprocess_result(values, target_profile, word_salad, style_anchor, style_
             "background_prompt": background_prompt,
         }
         base_prompt, foreground_prompt, background_prompt = _anima_prompt_parts(
+            positive,
+            word_salad,
+            style_anchor,
+            provided if any(provided.values()) else None,
+        )
+        positive = _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt)
+    elif target_profile == "krea2":
+        provided = {
+            "base_prompt": base_prompt,
+            "foreground_prompt": foreground_prompt,
+            "background_prompt": background_prompt,
+        }
+        base_prompt, foreground_prompt, background_prompt = _krea2_prompt_parts(
             positive,
             word_salad,
             style_anchor,
@@ -1267,7 +1487,7 @@ def _style_tags_from_terms(terms, limit=18):
 
 def _candidate_data(target_profile, word_salad, style_anchor):
     target_profile = _normalize_target_profile(target_profile)
-    if target_profile not in ("pony_v6", "illustrious", "anima"):
+    if target_profile not in ("pony_v6", "illustrious", "anima", "krea2"):
         return {}
 
     source_terms = _curated_terms(word_salad, limit=48, filter_low_value=False)
@@ -1289,6 +1509,9 @@ def _candidate_data(target_profile, word_salad, style_anchor):
                 fixed_base_tags = list(fixed_base_tags)
                 fixed_base_tags.extend(anchor_tags)
                 fixed_base_tags.extend(("anime_illustration", "digital_art", "clean_linework"))
+        elif target_profile == "krea2":
+            fixed_base_tags = list(anchor_tags)
+            fixed_base_tags.extend(_style_tags_from_terms(source_terms, limit=12))
         else:
             fixed_base_tags = list(ILLUSTRIOUS_BASE_TAGS)
             fixed_base_tags.extend(anchor_tags)
@@ -1327,6 +1550,7 @@ Do not move foreground candidates into background_prompt.
 Do not move background candidates into foreground_prompt.
 For Pony v6 and Illustrious, write background_prompt as concrete visible background tags.
 For Anima, turn the candidate ingredients into short natural sentences rather than copying them as a tag list.
+For Krea 2, turn them into neutral natural prose with concrete color, quantity, shape, material, texture, and spatial relationships.
 If background_candidates name a setting, expand that setting with matching visible objects from that same kind of place.
 Do not borrow objects from unrelated example settings.
 Do not copy candidate-list names, empty markers, or instruction words into any output value.
@@ -2196,6 +2420,163 @@ def _anima_prompt_parts(value, word_salad, style_anchor, provided=None):
     return base_prompt, foreground_prompt, background_prompt
 
 
+KREA2_CONTROL_PATTERN = re.compile(
+    r"\b(?:score_\d+(?:_up)?|rating_[a-z0-9_]+|style_cluster_\d+|source_[a-z0-9_]+|"
+    r"masterpiece|best[ _]quality)\b\s*,?\s*",
+    re.IGNORECASE,
+)
+
+NATURAL_META_OPENING_PATTERN = re.compile(
+    r"^\s*(?:(?:in|within)\s+(?:this|the)\s+(?:image|photo|picture)\s*[,;:]?\s*|"
+    r"(?:this|the)\s+(?:image|photo|picture|scene)\s+(?:shows?|depicts?|presents?|contains?|centers?\s+on)\s*[:;,]?\s*)",
+    re.IGNORECASE,
+)
+
+
+def _strip_natural_meta_opening(value):
+    return NATURAL_META_OPENING_PATTERN.sub("", str(value), count=1).lstrip(" ,;:-")
+
+
+def _clean_krea2_prose(value):
+    quoted_text = []
+
+    def protect_quote(match):
+        quoted_text.append(match.group(0))
+        return f"KREAQUOTED{len(quoted_text) - 1}TOKEN"
+
+    text = re.sub(r'"[^"\n]*"|“[^”\n]*”', protect_quote, str(value))
+    text = KREA2_CONTROL_PATTERN.sub("", text)
+    text = _clean_anima_prose(text)
+    text = _strip_natural_meta_opening(text)
+    for index, quoted in enumerate(quoted_text):
+        text = text.replace(f"KREAQUOTED{index}TOKEN", quoted)
+    if text:
+        text = text[:1].upper() + text[1:]
+    return text
+
+
+def _krea2_prose_is_usable(value):
+    text = _clean_krea2_prose(value)
+    if _word_count(text) < 10 or ANIMA_META_PROSE_PATTERN.search(text):
+        return False
+    return bool(ANIMA_VISUAL_PROSE_PATTERN.search(text))
+
+
+def _krea2_sentences(value):
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+", str(value).strip()) if part.strip()]
+
+
+def _fit_krea2_prose(value, fallback, min_words, max_words):
+    cleaned = _clean_krea2_prose(value)
+    if not _krea2_prose_is_usable(cleaned):
+        cleaned = _clean_krea2_prose(fallback)
+    sentences = _krea2_sentences(cleaned)
+
+    fitted = []
+    seen = set()
+    for sentence in sentences:
+        key = sentence.casefold()
+        if key in seen:
+            continue
+        candidate = " ".join((*fitted, sentence))
+        if fitted and _word_count(candidate) > max_words:
+            break
+        if not fitted and _word_count(sentence) > max_words:
+            words = sentence.split()
+            fitted.append(" ".join(words[:max_words]).rstrip(" ,.;:-") + ".")
+            break
+        fitted.append(sentence)
+        seen.add(key)
+    return " ".join(fitted)
+
+
+def _krea2_subject_text(terms, fallback):
+    cleaned = [_clean_z_image_text(term).lower() for term in terms if _clean_z_image_text(term)]
+    return _sentence_from_terms(cleaned[:8], fallback)
+
+
+def _krea2_foreground_fallback(foreground_terms, source_terms):
+    visual_terms = foreground_terms or source_terms
+    subject = _krea2_subject_text(visual_terms, "a clearly defined main subject")
+    details = _krea2_subject_text(visual_terms[8:14], "distinctive clothing, surfaces, and nearby objects")
+    return (
+        f"{subject[:1].upper() + subject[1:]} forms one coherent and immediately readable main subject. "
+        "Its quantity, scale, silhouette, pose, and direction of attention are visually unambiguous. "
+        "The action uses believable body weight and clear contact with the surrounding objects. "
+        "Colors are specific and consistent across skin, hair, fabric, metal, glass, wood, or other visible surfaces. "
+        f"Fine details include {details}, with recognizable shapes, material texture, seams, edges, reflections, and signs of wear. "
+        "Hands, limbs, facial features, held props, and overlapping forms remain anatomically and spatially understandable. "
+        "Any requested lettering appears exactly as quoted on a clearly identified surface."
+    )
+
+
+def _krea2_background_fallback(background_terms, source_terms):
+    visual_terms = background_terms or source_terms
+    setting = _krea2_subject_text(visual_terms, "a concrete environment related to the central idea")
+    return (
+        f"The environment includes {setting}, with recognizable architecture, terrain, furniture, plants, machinery, or practical props. "
+        "Nearby objects sit in front of and beside the subject, while smaller distant forms establish scale and depth. "
+        "A visible light source creates consistent highlights, contact shadows, reflections, and a controlled color atmosphere. "
+        "Weather, dust, mist, water, or other environmental effects remain physically connected to the surfaces and open space. "
+        "The background supports the focal action without hiding important shapes or introducing unrelated objects."
+    )
+
+
+def _krea2_base_prompt(provided_base, style_anchor):
+    anchor = str(style_anchor).strip()
+    provided = str(provided_base).strip()
+    if anchor and provided.casefold().startswith(anchor.casefold()):
+        provided = provided[len(anchor) :].lstrip(" ,.;:-")
+    fallback = (
+        "A carefully composed image uses a clear camera angle, controlled focal depth, coherent lighting, "
+        "a deliberate color palette, and realistic material response."
+    )
+    if not anchor:
+        return _fit_krea2_prose(provided, fallback, *KREA2_BASE_WORD_RANGE)
+
+    anchor_words = _word_count(anchor)
+    if anchor_words >= KREA2_BASE_WORD_RANGE[1]:
+        return anchor
+    tail_min = max(3, KREA2_BASE_WORD_RANGE[0] - anchor_words)
+    tail_max = max(tail_min, KREA2_BASE_WORD_RANGE[1] - anchor_words)
+    tail = _fit_krea2_prose(provided, fallback, tail_min, tail_max)
+    return f"{anchor}, {tail}" if tail else anchor
+
+
+def _krea2_prompt_parts(value, word_salad, style_anchor, provided=None):
+    provided = provided or {}
+    source_parts = [
+        word_salad,
+        provided.get("foreground_prompt", ""),
+        provided.get("background_prompt", ""),
+    ]
+    if not any(str(part).strip() for part in source_parts):
+        source_parts.append(value)
+    combined_source = " ".join(
+        str(part)
+        for part in source_parts
+        if str(part).strip()
+    )
+    foreground_terms, background_terms, _style_terms, all_terms = _split_pony_v7_terms(
+        combined_source,
+        "",
+        "",
+    )
+    source_terms = _curated_terms(combined_source, limit=48, filter_low_value=False)
+    base_prompt = _krea2_base_prompt(provided.get("base_prompt", ""), style_anchor)
+    foreground_prompt = _fit_krea2_prose(
+        provided.get("foreground_prompt", ""),
+        _krea2_foreground_fallback(foreground_terms, source_terms),
+        *KREA2_FOREGROUND_WORD_RANGE,
+    )
+    background_prompt = _fit_krea2_prose(
+        provided.get("background_prompt", ""),
+        _krea2_background_fallback(background_terms, all_terms or source_terms),
+        *KREA2_BACKGROUND_WORD_RANGE,
+    )
+    return base_prompt, foreground_prompt, background_prompt
+
+
 def _balanced_tag_prompt_parts(target_profile, value, word_salad, style_anchor, provided=None):
     target_profile = _normalize_target_profile(target_profile)
     provided = provided or {}
@@ -2779,6 +3160,7 @@ def _clean_z_image_text(value):
     text = re.sub(r"\s+,", ",", text)
     text = re.sub(r",\s*,+", ", ", text)
     text = re.sub(r"\s+", " ", text).strip(" ,.;")
+    text = _strip_natural_meta_opening(text)
     if not text:
         return ""
     return text[:1].upper() + text[1:]
@@ -2814,7 +3196,7 @@ def _z_image_foreground_fallback(word_salad, style_anchor, value):
     terms = _z_image_terms(word_salad, style_anchor, value, limit=12)
     subject = _sentence_from_terms(terms[:8], "a clearly defined subject based on the provided idea")
     return (
-        f"The image centers on {subject}. The subject appears as a real visual presence with a readable pose, "
+        f"{subject[:1].upper() + subject[1:]} appears as a real visual presence with a readable pose, "
         "clear body language, visible clothing or surface texture, and small details that make the concept feel "
         "intentional. The action is easy to understand at a glance, with natural proportions, believable materials, "
         "and a few distinctive features that guide the viewer's attention. The angle of the head or object, the "
@@ -2882,19 +3264,22 @@ def _z_image_prompt_parts(value, word_salad, style_anchor, provided=None):
     foreground_fallback = _z_image_foreground_fallback(word_salad, style_anchor, "")
     if not _z_image_section_is_usable(foreground):
         foreground = foreground_fallback
-    foreground = _extend_z_image_section(foreground, foreground_fallback, Z_IMAGE_FOREGROUND_MIN_WORDS)
 
     background = _clean_z_image_text(provided.get("background_prompt", ""))
     background_fallback = _z_image_background_fallback(word_salad, style_anchor, "")
     if not _z_image_section_is_usable(background):
         background = background_fallback
-    background = _extend_z_image_section(background, background_fallback, Z_IMAGE_BACKGROUND_MIN_WORDS)
 
-    base = _clean_z_image_text(provided.get("base_prompt", ""))
-    base_fallback = _z_image_base_fallback(word_salad, style_anchor, "")
+    anchor = str(style_anchor).strip()
+    raw_base = str(provided.get("base_prompt", "")).strip()
+    if anchor and raw_base.casefold().startswith(anchor.casefold()):
+        raw_base = raw_base[len(anchor) :].lstrip(" ,.;:-")
+    base = _clean_z_image_text(raw_base)
+    base_fallback = _z_image_base_fallback(word_salad, "" if anchor else style_anchor, "")
     if not _z_image_section_is_usable(base, min_words=15):
         base = base_fallback
-    base = _extend_z_image_section(base, base_fallback, Z_IMAGE_BASE_MIN_WORDS)
+    if anchor:
+        base = f"{anchor}, {base}" if base else anchor
 
     return base, foreground, background
 
@@ -2962,9 +3347,12 @@ def _needs_pony_v7_structure(prompt):
 
 def _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt):
     profile = _normalize_target_profile(target_profile)
-    if profile == "z_image":
-        parts = [foreground_prompt, background_prompt, base_prompt]
-        return "\n\n".join(str(part).strip() for part in parts if str(part).strip())
+    if profile in ("z_image", "krea2"):
+        first_paragraph = str(foreground_prompt).strip()
+        second_paragraph = " ".join(
+            str(part).strip() for part in (background_prompt, base_prompt) if str(part).strip()
+        )
+        return "\n\n".join(part for part in (first_paragraph, second_paragraph) if part)
     if profile == "anima":
         parts = [str(part).strip().strip(",") for part in (base_prompt, foreground_prompt, background_prompt) if str(part).strip()]
         return "\n\n".join(parts)
@@ -3139,6 +3527,14 @@ def _profile_positive_fallback(target_profile, word_salad, style_anchor, style_c
         )
         base = "cinematic video, stable composition, coherent lighting, natural motion, consistent color and texture"
         return _join_positive_parts("wan2_2_video", base, foreground, background)
+    if target_profile == "krea2":
+        base_prompt, foreground_prompt, background_prompt = _krea2_prompt_parts(
+            "",
+            word_salad,
+            style_anchor,
+            None,
+        )
+        return _join_positive_parts("krea2", base_prompt, foreground_prompt, background_prompt)
 
     phrase = ", ".join(salad_terms[:12]) if salad_terms else "a coherent anime subject with clean visual focus"
     return _structured_pony_v7_prompt(
@@ -3149,7 +3545,17 @@ def _profile_positive_fallback(target_profile, word_salad, style_anchor, style_c
     )
 
 
-def _local_fallback_result(target_profile, word_salad, style_anchor, style_cluster, error_message):
+def _local_fallback_result(
+    target_profile,
+    word_salad,
+    style_anchor,
+    style_cluster,
+    error_message,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
     target_profile = _normalize_target_profile(target_profile)
     values = {
         "positive": _profile_positive_fallback(target_profile, word_salad, style_anchor, style_cluster),
@@ -3159,7 +3565,8 @@ def _local_fallback_result(target_profile, word_salad, style_anchor, style_clust
             f"Parser detail: {error_message}"
         ),
     }
-    return _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
+    result = _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
+    return _apply_spatial_result(result, target_profile, left, right, top, bottom)
 
 
 def _target_profile_instructions(target_profile, style_cluster):
@@ -3210,16 +3617,32 @@ def _target_profile_instructions(target_profile, style_cluster):
 - Do not use Pony v7 controls such as rating_explicit, style_cluster_*, source_* tags, or a rating/style_cluster header.
 - negative should include Anima-appropriate quality/anatomy/artifact negatives and must not repeat the positive prompt."""
     if target_profile == "z_image":
-        return """Target profile: Z-Image.
+        return f"""Target profile: Z-Image.
+{NATURAL_SUBJECT_FIRST_GUIDANCE}
 - Write natural, detailed image-description prose, not SDXL/Danbooru tag lists.
-- Write enough complete sentences for a long Z-Image prompt, about 360 to 440 words total after the three positive fields are joined.
-- base_prompt describes medium, visual style, camera/framing, lighting approach, color mood, rendering language, lens behavior, focus, contrast, and texture handling in about 80 to 100 words.
-- foreground_prompt describes the main subject, action, posture, visible materials, expression, clothing or surface details, focal details, contact points, and physical readability in about 130 to 160 words.
-- background_prompt describes the environment, scene context, light sources, atmosphere, architecture/terrain/props, depth cues, distant objects, and spatial layering in about 130 to 160 words.
-- positive is built locally from foreground_prompt, background_prompt, then base_prompt and should read like one detailed 400 word Z-Image prompt.
+- Aim for about 300 to 360 words total after the three positive fields are joined. This is a writing target, not a reason to add generic filler.
+- base_prompt describes medium, visual style, camera/framing, lighting approach, color mood, rendering language, lens behavior, focus, contrast, and texture handling in about 55 to 70 words.
+- When a style anchor is provided, base_prompt must begin exactly with that unchanged anchor. It remains in the closing positive paragraph so the main subject still comes first.
+- foreground_prompt is the largest section at about 140 to 165 words and describes the main subject, action, posture, anatomy or form, visible materials, expression, clothing or surface details, focal details, contact points, and physical readability.
+- background_prompt describes the environment, scene context, light sources, atmosphere, architecture/terrain/props, depth cues, distant objects, and spatial layering in about 105 to 125 words.
+- positive is built locally as at most two paragraphs: foreground_prompt first, then background_prompt and base_prompt together. It must begin with the main subject and finish with lighting, mood, medium, and aesthetic guidance.
 - negative should be an empty string because Z-Image Turbo does not use negative prompts.
 - Do not use control tags such as score_9, source_anthro, rating_explicit, style_cluster, masterpiece, best quality, 8k, or tag spam.
 - Do not include visible section labels."""
+    if target_profile == "krea2":
+        return f"""Target profile: Krea 2.
+{NATURAL_SUBJECT_FIRST_GUIDANCE}
+- Write neutral natural English image-description prose, not Danbooru tags, SDXL quality tags, or a keyword pile.
+- Aim for about 300 to 360 words across the three positive fields. This is a writing target, not a reason to add generic filler.
+- base_prompt should be about 55 to 70 words and describe medium/style, camera angle or framing, composition, lighting, color treatment, lens behavior, focus, contrast, texture handling, and material response.
+- When a style anchor is provided, base_prompt must begin exactly with that unchanged anchor. Treat it as a fixed style or LoRA trigger.
+- foreground_prompt should be the largest section at about 140 to 165 words and clearly describe the main subject, anatomy or form, quantity, color, shape, relative size, pose, action, expression, clothing or surface materials, textures, and important held or touched objects.
+- background_prompt should be about 105 to 125 words and describe the concrete environment, visible objects, architecture or terrain, light sources, atmosphere, depth, and spatial relationships such as in front of, behind, beside, above, or reflected in.
+- If visible writing is requested, quote its exact content and identify the sign, screen, garment, page, or surface where it appears.
+- Keep quantities and object relationships unambiguous. Do not introduce unrelated decorative objects merely to make the prompt longer.
+- positive is built locally as at most two paragraphs: foreground_prompt first, then background_prompt and base_prompt together. The unchanged style anchor remains in base_prompt and therefore does not override the subject-first opening.
+- Do not use score_*, rating_*, style_cluster_*, source_*, masterpiece, best quality, section labels, candidate-list names, or generic prompt-engineering language.
+- negative must be a concise list of quality, anatomy, geometry, duplicate-subject, unreadable-text, watermark, logo, and compression failures to avoid."""
     if target_profile == "wan2_2_video":
         return """Target profile: Wan 2.2 TI2V-5B video.
 - Write concise natural English visual prose, not Danbooru tags or an image-quality keyword pile.
@@ -3295,10 +3718,28 @@ foreground_prompt => {foreground_prompt}
 background_prompt => {background_prompt}
 negative => worst quality, low quality, score_1, score_2, score_3, artist name, bad anatomy, bad hands, text, watermark, blurry
 report => Built a natural Anima prompt from sorted visual candidates."""
+    if target_profile == "krea2":
+        anchor = str(style_anchor).strip()
+        anchor_prefix = f"{anchor}, " if anchor else ""
+        return f"""Example field values for Krea 2 (positive is joined subject-first):
+base_prompt => {anchor_prefix}A cinematic medium shot uses warm window light, muted blue and copper colors, shallow focal depth, and realistic glass and metal reflections.
+foreground_prompt => One copper-haired archivist opens a worn leather book beside a compact brass machine. She holds a palm-sized blue crystal above the page, where its cool glow reflects across her fingers, silver buttons, damp coat seams, and three clear glass bottles.
+background_prompt => A narrow wooden workshop surrounds her. Tall rain-streaked windows stand behind the table, with blurred city rooftops beyond them. A copper lamp to her left creates warm contact shadows beneath the tools and books.
+negative => worst quality, low quality, blurry, bad anatomy, bad hands, extra fingers, duplicate subject, distorted geometry, unreadable text, watermark, logo
+report => Built a natural Krea 2 description with explicit materials, lighting, quantities, and spatial relationships."""
     return ""
 
 
-def _build_generation_prompt(target_profile, word_salad, style_anchor, style_cluster):
+def _build_generation_prompt(
+    target_profile,
+    word_salad,
+    style_anchor,
+    style_cluster,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
     target_profile = _normalize_target_profile(target_profile)
     anchor = str(style_anchor).strip()
     anchor_block = anchor if anchor else "(none)"
@@ -3306,16 +3747,19 @@ def _build_generation_prompt(target_profile, word_salad, style_anchor, style_clu
     example = _candidate_few_shot_example(target_profile, word_salad, style_anchor)
     candidate_block = f"\n{candidate_context}\n" if candidate_context else ""
     example_block = f"\n{example}\n" if example else ""
+    spatial_context = _spatial_context(target_profile, left, right, top, bottom)
+    spatial_block = f"\n{spatial_context}\n" if spatial_context else ""
     return f"""Rewrite this random word salad into one model-specific image prompt set.
 
 {_target_profile_instructions(target_profile, style_cluster)}
 {example_block}{candidate_block}
 
-Random word salad:
+Random word salad (global guidance for the entire image):
 {str(word_salad).strip()}
 
 Style anchor / fixed requirements:
 {anchor_block}
+{spatial_block}
 
 Important:
 - Fill every JSON field with a useful non-empty string, except Z-Image negative which should be empty.
@@ -3325,6 +3769,9 @@ Important:
 - For Anima, do not use Pony v7/SDXL/Z-Image control language such as style_cluster_*, rating_explicit, or source_* tags.
 - For Anima, your foreground_prompt and background_prompt should be final usable prose, not placeholders for later rewriting.
 - For Anima, do not include labels, candidate-list headings, "built around", "final mood joins", or "the scene should feel" inside JSON values.
+- For Krea 2, keep the style anchor unchanged at the beginning of base_prompt. The combined positive must still begin with foreground_prompt and its main subject.
+- For Krea 2 and Z-Image, avoid meta openings and follow the shared subject-to-aesthetic content order.
+- For Krea 2, do not emit Anima/Pony quality controls or Danbooru tag chains.
 - Start your response with {{ and end it with }}.
 - Use exactly the requested JSON keys, with no markdown and no commentary.
 - Required JSON keys: {", ".join(RESPONSE_KEYS)}.
@@ -3332,18 +3779,37 @@ Important:
 Return valid JSON only."""
 
 
-def _build_repair_prompt(raw_response):
+def _build_repair_prompt(
+    raw_response,
+    target_profile=DEFAULT_TARGET_PROFILE,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
+    spatial_context = _spatial_context(target_profile, left, right, top, bottom)
+    spatial_block = f"\n{spatial_context}\nKeep these spatial hints represented in the repaired values.\n" if spatial_context else ""
     return f"""Repair the following invalid answer into valid JSON only.
 It must contain exactly these string keys:
 {", ".join(RESPONSE_KEYS)}
 Every value except negative must be a non-empty string.
 Negative fields must be real negative prompts unless the target instructions say the model uses no negative prompt.
+{spatial_block}
 
 Invalid answer:
 {raw_response}"""
 
 
-def _build_minimal_retry_prompt(target_profile, word_salad, style_anchor, style_cluster):
+def _build_minimal_retry_prompt(
+    target_profile,
+    word_salad,
+    style_anchor,
+    style_cluster,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
     terms = ", ".join(_curated_terms(f"{style_anchor} {word_salad}", limit=18))
     if not terms:
         terms = "anime subject, clean composition, detailed lighting"
@@ -3352,10 +3818,12 @@ def _build_minimal_retry_prompt(target_profile, word_salad, style_anchor, style_
     example = _candidate_few_shot_example(target_profile, word_salad, style_anchor)
     candidate_block = f"\n{candidate_context}" if candidate_context else ""
     example_block = f"\n{example}" if example else ""
+    spatial_context = _spatial_context(target_profile, left, right, top, bottom)
+    spatial_block = f"\n{spatial_context}" if spatial_context else ""
     return f"""Return one JSON object only. No markdown. No prose.
 Use exactly these keys: {", ".join(RESPONSE_KEYS)}
 {_target_profile_instructions(target_profile, style_cluster)}
-{example_block}{candidate_block}
+{example_block}{candidate_block}{spatial_block}
 Source visual terms: {terms}
 Rules: base_prompt contains global model/style or natural style guidance; foreground_prompt describes the main subject; background_prompt describes the visible setting; negative lists quality/anatomy/artifact problems to avoid unless the target profile says it is unused; report is one short sentence."""
 
@@ -3365,6 +3833,12 @@ class NukunOllamaPromptRefiner:
     def INPUT_TYPES(cls):
         available_models = _available_ollama_models()
         default_model = DEFAULT_OLLAMA_MODEL if DEFAULT_OLLAMA_MODEL in available_models else available_models[0]
+        spatial_options = {
+            "default": "",
+            "multiline": True,
+            "dynamicPrompts": True,
+            "defaultInput": True,
+        }
         return {
             "required": {
                 "word_salad": (
@@ -3466,6 +3940,34 @@ class NukunOllamaPromptRefiner:
                         "tooltip": "Optional fixed motifs, character names, LoRA tags, or quality tags to preserve.",
                     },
                 ),
+                "left": (
+                    "STRING",
+                    {
+                        **spatial_options,
+                        "tooltip": "Optional creative guidance for the left side of natural-language prompts.",
+                    },
+                ),
+                "right": (
+                    "STRING",
+                    {
+                        **spatial_options,
+                        "tooltip": "Optional creative guidance for the right side of natural-language prompts.",
+                    },
+                ),
+                "top": (
+                    "STRING",
+                    {
+                        **spatial_options,
+                        "tooltip": "Optional creative guidance for the top area of natural-language prompts.",
+                    },
+                ),
+                "bottom": (
+                    "STRING",
+                    {
+                        **spatial_options,
+                        "tooltip": "Optional creative guidance for the bottom area of natural-language prompts.",
+                    },
+                ),
             },
         }
 
@@ -3488,14 +3990,42 @@ class NukunOllamaPromptRefiner:
         timeout_seconds,
         context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH,
         style_anchor="",
+        left="",
+        right="",
+        top="",
+        bottom="",
     ):
-        if not str(word_salad).strip() and not str(style_anchor).strip():
-            raise RuntimeError("Ollama Prompt Refiner: word_salad or style_anchor must contain text")
+        has_primary_text = bool(str(word_salad).strip() or str(style_anchor).strip())
+        spatial_values = _spatial_values(left, right, top, bottom)
+        has_spatial_text = any(spatial_values.values())
+        if not has_primary_text and not has_spatial_text:
+            raise RuntimeError(
+                "Ollama Prompt Refiner: word_salad, style_anchor, or a spatial input must contain text"
+            )
+        if (
+            has_spatial_text
+            and not has_primary_text
+            and _normalize_target_profile(target_profile) not in SPATIAL_TARGET_PROFILES
+        ):
+            supported = ", ".join(sorted(SPATIAL_TARGET_PROFILES))
+            raise RuntimeError(
+                "Ollama Prompt Refiner: spatial-only input requires a natural prompt profile: "
+                f"{supported}"
+            )
 
         raw_response = _request_ollama(
             ollama_url,
             ollama_model,
-            _build_generation_prompt(target_profile, word_salad, style_anchor, style_cluster),
+            _build_generation_prompt(
+                target_profile,
+                word_salad,
+                style_anchor,
+                style_cluster,
+                left,
+                right,
+                top,
+                bottom,
+            ),
             seed,
             temperature,
             top_p,
@@ -3505,12 +4035,13 @@ class NukunOllamaPromptRefiner:
 
         try:
             values = _validate_result(_extract_json_object(raw_response))
-            return _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
+            result = _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
+            return _apply_spatial_result(result, target_profile, left, right, top, bottom)
         except ValueError as first_error:
             repair_response = _request_ollama(
                 ollama_url,
                 ollama_model,
-                _build_repair_prompt(raw_response),
+                _build_repair_prompt(raw_response, target_profile, left, right, top, bottom),
                 int(seed) + 1,
                 0.0,
                 1.0,
@@ -3519,12 +4050,22 @@ class NukunOllamaPromptRefiner:
             )
             try:
                 values = _validate_result(_extract_json_object(repair_response))
-                return _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
+                result = _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
+                return _apply_spatial_result(result, target_profile, left, right, top, bottom)
             except ValueError as second_error:
                 minimal_response = _request_ollama(
                     ollama_url,
                     ollama_model,
-                    _build_minimal_retry_prompt(target_profile, word_salad, style_anchor, style_cluster),
+                    _build_minimal_retry_prompt(
+                        target_profile,
+                        word_salad,
+                        style_anchor,
+                        style_cluster,
+                        left,
+                        right,
+                        top,
+                        bottom,
+                    ),
                     int(seed) + 2,
                     0.0,
                     1.0,
@@ -3533,7 +4074,8 @@ class NukunOllamaPromptRefiner:
                 )
                 try:
                     values = _validate_result(_extract_json_object(minimal_response))
-                    return _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
+                    result = _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
+                    return _apply_spatial_result(result, target_profile, left, right, top, bottom)
                 except ValueError as third_error:
                     return _local_fallback_result(
                         target_profile,
@@ -3541,6 +4083,10 @@ class NukunOllamaPromptRefiner:
                         style_anchor,
                         style_cluster,
                         f"initial={first_error}; repair={second_error}; minimal={third_error}",
+                        left,
+                        right,
+                        top,
+                        bottom,
                     )
 
     @classmethod
@@ -3557,6 +4103,10 @@ class NukunOllamaPromptRefiner:
         timeout_seconds,
         context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH,
         style_anchor="",
+        left="",
+        right="",
+        top="",
+        bottom="",
     ):
         digest = hashlib.sha256()
         for value in (
@@ -3571,6 +4121,10 @@ class NukunOllamaPromptRefiner:
             int(timeout_seconds),
             _normalize_context_length(context_length),
             style_anchor,
+            left,
+            right,
+            top,
+            bottom,
         ):
             digest.update(str(value).encode("utf-8"))
             digest.update(b"\0")

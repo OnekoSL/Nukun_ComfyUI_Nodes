@@ -149,7 +149,9 @@ class AnimaNaturalPromptTests(unittest.TestCase):
 
     def test_other_profile_instructions_remain_profile_specific(self):
         self.assertIn("Write tag tokens only", refiner._target_profile_instructions("pony_v6", 430))
-        self.assertIn("360 to 440 words", refiner._target_profile_instructions("z_image", 430))
+        z_image = refiner._target_profile_instructions("z_image", 430)
+        self.assertIn("300 to 360 words", z_image)
+        self.assertNotIn("360 to 440 words", z_image)
         self.assertIn("style_cluster_430", refiner._target_profile_instructions("pony_v7", 430))
 
 

@@ -12,6 +12,7 @@ from .diffusion_clip_vae_cycler_loader import (
     WEIGHT_DTYPES,
     _filename_model_name,
     _folder_name,
+    _clip_type_for_model,
     _model_name,
     _preferred_name,
 )
@@ -216,7 +217,9 @@ class NukunFourPromptModelCyclerLoader:
             models,
         )
         model = UNETLoader().load_unet(unet_name, weight_dtype)[0]
-        clip = CLIPLoader().load_clip(clip_name, clip_type, clip_device)[0]
+        clip = CLIPLoader().load_clip(
+            clip_name, _clip_type_for_model(model, clip_type), clip_device
+        )[0]
         vae = VAELoader().load_vae(vae_name)[0]
         return (
             text,
