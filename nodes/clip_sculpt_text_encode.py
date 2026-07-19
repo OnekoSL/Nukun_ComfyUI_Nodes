@@ -57,7 +57,7 @@ class NukunCLIPSculptTextEncode:
                 f"normalization: {token_normalization}; top_k: {int(top_k)}; "
                 f"eligible: {stats['eligible']}; sculpted: {stats['sculpted']}; "
                 f"neighbors: {stats['neighbors']}; cache entries: {stats['cache_entries']}; "
-                f"streams: {stats['streams']}"
+                f"streams: {stats['streams']}; {stats['search']}"
             )
         return (conditioning, report)
 

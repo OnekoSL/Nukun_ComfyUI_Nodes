@@ -1,8 +1,8 @@
 import numbers
 
 import torch
-import comfy.model_management as model_management
 
+from .embedding_sculpt_core import EmbeddingSculptSession
 from .t5_equal_length_balancer import SUPPORTED_TEXT_STREAM_KEYS
 
 
@@ -12,17 +12,6 @@ QWEN3VL_IM_START = 151644
 QWEN3VL_IM_END = 151645
 QWEN3VL_USER = 872
 QWEN3VL_NEWLINE = 198
-
-
-def maximum_absolute_values(tensors, reversed=False):
-    shape = tensors.shape
-    tensors = tensors.reshape(shape[0], -1)
-    tensors_abs = torch.abs(tensors)
-    if reversed:
-        idx = torch.argmin(tensors_abs, dim=0)
-    else:
-        idx = torch.argmax(tensors_abs, dim=0)
-    return tensors[idx, torch.arange(tensors.shape[1], device=tensors.device)].reshape(shape[1:])
 
 
 class NukunT5SculptEqualLengthBalancer:
@@ -161,93 +150,11 @@ class NukunT5SculptEqualLengthBalancer:
         }
 
     def _embedding_weights(self, submodel):
-        weight = submodel.transformer.get_input_embeddings().weight
-        device = model_management.get_torch_device()
-        return torch.clone(weight).to(device=device, dtype=torch.float32)
+        return submodel.transformer.get_input_embeddings().weight
 
     def _refine_token_weight(self, token_id, all_weights, method, intensity, top_k):
-        initial_weight = all_weights[token_id]
-        pre_mag = torch.norm(initial_weight)
-        if pre_mag == 0:
-            return initial_weight.detach().cpu(), 0
-
-        token_norm = torch.nn.functional.normalize(initial_weight.unsqueeze(0), dim=1)
-        all_norm = torch.nn.functional.normalize(all_weights, dim=1)
-        scores = torch.matmul(all_norm, token_norm.T).squeeze(1)
-        k = max(1, min(int(top_k) + 1, all_weights.shape[0]))
-        sorted_scores, sorted_ids = torch.topk(scores, k=k, largest=True)
-
-        candidate_ids = []
-        candidate_scores = []
-        for score, idx in zip(sorted_scores.tolist(), sorted_ids.tolist()):
-            idx = int(idx)
-            if idx == int(token_id):
-                continue
-            candidate_ids.append(idx)
-            candidate_scores.append(float(score))
-            if len(candidate_ids) >= int(top_k):
-                break
-
-        previous_cos_score = 0.0
-        cos_score = 1.0
-        selected_scores = []
-        selected_weights = []
-        initial_clone = torch.clone(initial_weight)
-
-        for idx, score in zip(candidate_ids, candidate_scores):
-            if len(selected_weights) > 0:
-                previous_cos_score = cos_score
-            selected_scores.append(score)
-            selected_weights.append(all_weights[idx])
-            vec_sum = torch.sum(torch.stack(selected_weights), dim=0)
-            cos_score = torch.nn.functional.cosine_similarity(
-                initial_clone.unsqueeze(0), vec_sum.unsqueeze(0), dim=1, eps=1e-6
-            ).item()
-            if not previous_cos_score < cos_score:
-                selected_scores.pop()
-                selected_weights.pop()
-                break
-
-        if len(selected_weights) <= 1:
-            return initial_weight.detach().cpu(), 0
-
-        if method == "maximum_absolute":
-            concurrent_weights = torch.stack(
-                [initial_clone / torch.norm(initial_clone)]
-                + [t / torch.norm(t) for t in selected_weights if torch.norm(t) > 0]
-            )
-            new_weight = maximum_absolute_values(concurrent_weights)
-            new_weight = new_weight * pre_mag / torch.norm(new_weight)
-            return new_weight.detach().cpu(), len(selected_weights)
-
-        if method == "add_minimum_absolute":
-            concurrent_weights = torch.stack(
-                [initial_clone / torch.norm(initial_clone)]
-                + [t / torch.norm(t) for t in selected_weights if torch.norm(t) > 0]
-            )
-            minimum_weight = maximum_absolute_values(concurrent_weights, reversed=True)
-            new_weight = initial_clone + minimum_weight * float(intensity)
-            new_weight = new_weight * pre_mag / torch.norm(new_weight)
-            return new_weight.detach().cpu(), len(selected_weights)
-
-        weighted_neighbors = torch.sum(
-            torch.stack([t * (selected_scores[i] ** 2) for i, t in enumerate(selected_weights)]),
-            dim=0,
-        )
-        final_score = torch.nn.functional.cosine_similarity(
-            initial_weight.unsqueeze(0), weighted_neighbors.unsqueeze(0), dim=1, eps=1e-6
-        ).item() * float(intensity)
-
-        if method == "backward":
-            new_weight = initial_weight + weighted_neighbors * final_score
-        else:
-            new_weight = initial_weight - weighted_neighbors * final_score
-
-        new_norm = torch.norm(new_weight)
-        if new_norm == 0:
-            return initial_weight.detach().cpu(), 0
-        new_weight = new_weight * pre_mag / new_norm
-        return new_weight.detach().cpu(), len(selected_weights)
+        session = EmbeddingSculptSession(all_weights, [token_id], top_k)
+        return session.sculpt(token_id, method, intensity)
 
     def _qwen3vl_user_content_range(self, batch):
         token_ids = [
@@ -285,7 +192,18 @@ class NukunT5SculptEqualLengthBalancer:
                 coords.append((batch_index, token_index, int(token_id)))
         return coords
 
-    def _apply_sculpting(self, tokens, stream_key, submodel, intensity, method, normalization, top_k):
+    def _apply_sculpting(
+        self,
+        tokens,
+        stream_key,
+        submodel,
+        intensity,
+        method,
+        normalization,
+        top_k,
+        session=None,
+        coords=None,
+    ):
         if float(intensity) <= 0 and normalization == "none":
             return 0, 0
 
@@ -293,12 +211,13 @@ class NukunT5SculptEqualLengthBalancer:
             raise RuntimeError(f"ERROR: Token stream '{stream_key}' was not found for sculpting.")
 
         special_ids = self._special_token_ids(submodel)
-        coords = self._eligible_entries(tokens, stream_key, special_ids)
+        coords = coords if coords is not None else self._eligible_entries(tokens, stream_key, special_ids)
         if len(coords) == 0:
             return 0, 0
 
-        all_weights = self._embedding_weights(submodel)
-        sculpt_cache = {}
+        if session is None:
+            search_ids = [token_id for _batch, _index, token_id in coords] if float(intensity) > 0 else []
+            session = EmbeddingSculptSession(self._embedding_weights(submodel), search_ids, top_k)
         sculpted_count = 0
         neighbor_count = 0
         mean_mag = 0.0
@@ -308,17 +227,14 @@ class NukunT5SculptEqualLengthBalancer:
             token_weight = tokens[stream_key][batch_index][token_index]
             attn_weight = float(token_weight[1])
             if float(intensity) > 0:
-                cache_key = (token_id, method, float(intensity), int(top_k))
-                if cache_key not in sculpt_cache:
-                    sculpt_cache[cache_key] = self._refine_token_weight(
-                        token_id, all_weights, method, float(intensity), int(top_k)
-                    )
-                new_vector, found = sculpt_cache[cache_key]
+                new_vector, found = session.sculpt(token_id, method, float(intensity))
                 if found > 0:
                     sculpted_count += 1
                     neighbor_count += found
             else:
-                new_vector = all_weights[token_id].detach().cpu()
+                new_vector = session.original(token_id)
+
+            new_vector = new_vector.clone()
 
             if normalization in ("mean", "mean * attention"):
                 mean_mag += torch.norm(new_vector).item()
@@ -336,7 +252,6 @@ class NukunT5SculptEqualLengthBalancer:
                 scale = mean_mag * (attn_weight if normalization == "mean * attention" else 1.0)
                 tokens[stream_key][batch_index][token_index] = (token_vector / norm * scale, current_attn)
 
-        del all_weights
         return sculpted_count, neighbor_count
 
     def balance(
@@ -383,6 +298,20 @@ class NukunT5SculptEqualLengthBalancer:
         positive_tokens = encoder.tokenize(positive)
         negative_tokens = encoder.tokenize(negative)
 
+        special_ids = self._special_token_ids(submodel)
+        positive_coords = self._eligible_entries(positive_tokens, stream_key, special_ids)
+        negative_coords = self._eligible_entries(negative_tokens, stream_key, special_ids)
+        search_ids = []
+        if float(positive_intensity) > 0:
+            search_ids.extend(token_id for _batch, _index, token_id in positive_coords)
+        if float(negative_intensity) > 0:
+            search_ids.extend(token_id for _batch, _index, token_id in negative_coords)
+        session = EmbeddingSculptSession(
+            self._embedding_weights(submodel),
+            search_ids,
+            top_k,
+        )
+
         positive_sculpted, positive_neighbors = self._apply_sculpting(
             positive_tokens,
             stream_key,
@@ -391,6 +320,8 @@ class NukunT5SculptEqualLengthBalancer:
             positive_method,
             positive_normalization,
             top_k,
+            session=session,
+            coords=positive_coords,
         )
         negative_sculpted, negative_neighbors = self._apply_sculpting(
             negative_tokens,
@@ -400,6 +331,8 @@ class NukunT5SculptEqualLengthBalancer:
             negative_method,
             negative_normalization,
             top_k,
+            session=session,
+            coords=negative_coords,
         )
 
         cond_positive = encoder.encode_from_tokens_scheduled(positive_tokens)
@@ -417,7 +350,7 @@ class NukunT5SculptEqualLengthBalancer:
             f"negative sculpted: {negative_sculpted} tokens / {negative_neighbors} neighbors; "
             f"negative method: {negative_method}; negative intensity: {float(negative_intensity):.2f}; "
             f"negative normalization: {negative_normalization}; "
-            f"top_k: {int(top_k)}"
+            f"top_k: {int(top_k)}; {session.report()}"
         )
 
         return (
