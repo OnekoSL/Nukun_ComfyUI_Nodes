@@ -127,7 +127,8 @@ This node reads a selected comma-separated plain-text word list and outputs a de
 It can use `ComfyUI/user/vocab.json` or bundled files such as `resources/english_words.csv`; add more `.csv`, `.txt`, or `.json` files to `resources/` to make them selectable.
 Set `amount` for the number of words and use the `seed` widget's control-after-generate behavior as a block cursor: incrementing walks through non-overlapping shuffled blocks before reshuffling, while randomizing jumps to another block.
 Words are deduplicated before sampling; if `amount` is larger than the available vocabulary, the output is clamped to the full list.
-Bundled category vocabularies include places/environments, objects, animals and mythical creatures, verbs, nouns, adjectives, `*ing` words, camera/composition terms, quality tags, person names, countries, and cities.
+Bundled category vocabularies include places/environments, objects, animals and mythical creatures, verbs, nouns, adjectives, `*ing` words, camera/composition terms, quality tags, person names, countries, cities, and 250 visual art styles.
+Use `resources/visual_art_styles.csv` with `amount = 1` when you want one clear style anchor spanning drawing, painting, printmaking, comics, animation, design, digital art, crafted media, photography, or historical art movements.
 Bundled Little Doom LoRA keyword resources are also available as `little_doom_*.csv`, including clean, character/source, visual feature, clothing, action, setting, style, mature, and dark/gore subsets.
 Connect the optional `chain` input to append generated words after an existing string and build prompt chains.
 

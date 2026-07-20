@@ -115,11 +115,14 @@ Common bundled choices include:
 
 - `resources/quality_tags.csv`
 - `resources/camera_composition.csv`
+- `resources/visual_art_styles.csv`
 - `resources/anima2b_artists_clean.csv`
 - `resources/adjectives.csv`
 - `resources/objects.csv`
 - `resources/place_environments.csv`
 - `resources/animals_mythical_creatures.csv`
 - `resources/little_doom_*.csv`
+
+`resources/visual_art_styles.csv` contains 250 short, model-neutral style phrases covering drawing and linework, painting, printmaking and paper, comics, animation and illustration, graphic design, digital and concept art, 3D and crafted media, photography and cinematography, and historical or decorative art. Use `amount = 1` for a clear single style anchor; larger values intentionally blend multiple visual treatments.
 
 The resource list updates when ComfyUI reloads the custom node package.

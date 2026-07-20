@@ -11,6 +11,7 @@ if str(COMFY_ROOT) not in sys.path:
     sys.path.insert(0, str(COMFY_ROOT))
 
 MODULE_PATH = COMFY_ROOT / "custom_nodes" / "Nukun_ComfyUI_Nodes" / "nodes" / "random_vocab_string_list.py"
+RESOURCE_ROOT = MODULE_PATH.parents[1] / "resources"
 spec = importlib.util.spec_from_file_location("random_vocab_string_list", MODULE_PATH)
 vocab = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(vocab)
@@ -114,6 +115,58 @@ class MultiVocabShuffleBagTests(unittest.TestCase):
             self.assertEqual(inputs[f"word_index_{slot}"][1]["control_after_generate"], True)
             for word_index in range(1, 4):
                 self.assertNotIn(f"word_{slot}_{word_index}", inputs)
+
+
+class VisualArtStylesResourceTests(unittest.TestCase):
+    RESOURCE_LABEL = "resources/visual_art_styles.csv"
+    REPRESENTATIVE_STYLES = {
+        "continuous line drawing",
+        "gouache illustration",
+        "linocut print style",
+        "graphic novel art",
+        "anime style",
+        "typographic poster",
+        "pixel art",
+        "stained glass art",
+        "film noir cinematography",
+        "art nouveau illustration",
+    }
+
+    @classmethod
+    def _resource_text(cls):
+        return (RESOURCE_ROOT / "visual_art_styles.csv").read_text(encoding="utf-8")
+
+    def test_visual_art_styles_is_selectable(self):
+        self.assertIn(self.RESOURCE_LABEL, vocab._list_resource_vocab_files())
+
+    def test_visual_art_styles_has_ten_groups_of_twenty_five(self):
+        lines = self._resource_text().splitlines()
+        self.assertEqual(len(lines), 10)
+        for line in lines:
+            self.assertEqual(len([entry for entry in line.split(",") if entry]), 25)
+
+    def test_visual_art_styles_are_unique_prompt_ready_phrases(self):
+        entries = vocab._load_words(self.RESOURCE_LABEL)
+        self.assertEqual(len(entries), 250)
+        self.assertEqual(len({entry.casefold() for entry in entries}), 250)
+
+        for entry in entries:
+            self.assertEqual(entry, entry.strip())
+            self.assertEqual(entry, entry.lower())
+            self.assertNotIn("  ", entry)
+            self.assertNotIn("\n", entry)
+            self.assertLessEqual(len(entry.split()), 6)
+
+    def test_visual_art_styles_cover_all_planned_categories(self):
+        entries = set(vocab._load_words(self.RESOURCE_LABEL))
+        self.assertTrue(self.REPRESENTATIVE_STYLES.issubset(entries))
+
+    def test_visual_art_styles_avoid_named_style_language(self):
+        entries = vocab._load_words(self.RESOURCE_LABEL)
+        forbidden_markers = ("inspired by", "in the style of", "studio ", " franchise")
+        for entry in entries:
+            lowered = entry.casefold()
+            self.assertFalse(any(marker in lowered for marker in forbidden_markers))
 
 
 if __name__ == "__main__":

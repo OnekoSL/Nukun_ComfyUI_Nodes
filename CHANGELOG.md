@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added `resources/visual_art_styles.csv` with 250 original, model-neutral style phrases across ten visual-art categories, inspired in breadth by [ComfyUI-NO8D-controls](https://github.com/no8d/ComfyUI-NO8D-controls) without copying its long prompt descriptions or named styles.
+
 ## v0.7.0
 
 - Added the `krea2` Ollama Prompt Refiner profile with subject-first natural-language prompts, exact preservation of visible quoted text, concrete spatial and material descriptions, and conservative negative prompts.
