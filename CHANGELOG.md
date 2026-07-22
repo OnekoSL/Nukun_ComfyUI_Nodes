@@ -2,7 +2,10 @@
 
 ## Unreleased
 
+- Added optional `plan_compile` and `plan_compile_review` Ollama Prompt Refiner pipelines with structured planning, local validation, semantic review, one bounded correction, appended plan/review JSON outputs, and stage-aware fallback behavior for every target profile.
 - Added `resources/visual_art_styles.csv` with 250 original, model-neutral style phrases across ten visual-art categories, inspired in breadth by [ComfyUI-NO8D-controls](https://github.com/no8d/ComfyUI-NO8D-controls) without copying its long prompt descriptions or named styles.
+- Strengthened Anima spatial prompting so left, right, top, and bottom inputs form one continuous camera view, merge repeated character details into one figure, and discourage split screens, panels, and duplicate views.
+- Replaced the natural-profile stock prompt fallback with selectable `adaptive`, `strict`, and `continue` recovery modes; short concrete Ollama prose is preserved by default, while `continue` can pass through partial responses or connected inputs after response and transport errors.
 
 ## v0.7.0
 

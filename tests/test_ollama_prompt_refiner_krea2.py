@@ -117,16 +117,18 @@ class Krea2PromptProfileTests(unittest.TestCase):
             "invalid response",
         )
         self.assertTrue(positive.startswith(foreground))
-        self.assertTrue(base.startswith("soft watercolor style,"))
+        self.assertEqual(base, "soft watercolor style")
         self.assertEqual(positive, refiner._join_positive_parts("krea2", base, foreground, background))
         self.assertIn("distorted geometry", negative)
-        self.assertIn("local fallback", report.lower())
+        self.assertIn("stage=local", report.lower())
+        self.assertIn("fallback_mode=adaptive", report.lower())
         self.assertNotIn("score_", positive.lower())
         self.assertLess(refiner._word_count(positive), refiner.KREA2_POSITIVE_WORD_RANGE[0])
 
-    def test_node_interface_is_unchanged(self):
-        self.assertEqual(refiner.NukunOllamaPromptRefiner.RETURN_NAMES, refiner.OUTPUT_KEYS)
-        self.assertEqual(len(refiner.NukunOllamaPromptRefiner.RETURN_TYPES), 6)
+    def test_node_interface_keeps_existing_outputs_first(self):
+        self.assertEqual(refiner.NukunOllamaPromptRefiner.RETURN_NAMES[:6], refiner.OUTPUT_KEYS)
+        self.assertEqual(refiner.NukunOllamaPromptRefiner.RETURN_NAMES[6:], ("plan_json", "review_json"))
+        self.assertEqual(len(refiner.NukunOllamaPromptRefiner.RETURN_TYPES), 8)
 
 
 if __name__ == "__main__":

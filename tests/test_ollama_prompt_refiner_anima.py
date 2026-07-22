@@ -50,13 +50,14 @@ class AnimaNaturalPromptTests(unittest.TestCase):
         self.assertLess(positive.index("A silver-haired archivist"), positive.index("Three glass bottles"))
         self.assertNotIn("built around", positive)
 
-    def test_short_answer_is_extended_with_simple_prose(self):
-        positive = anima_result(
+    def test_short_answer_is_preserved_without_standard_padding(self):
+        positive, _, _, _, foreground, background = anima_result(
             "A mage holds a crystal. She studies its light.",
             "A workshop surrounds her. The room feels calm.",
-        )[0]
-        self.assertGreaterEqual(refiner._word_count(positive), refiner.ANIMA_POSITIVE_WORD_RANGE[0])
-        self.assertGreaterEqual(len(refiner._anima_sentences(positive)), 10)
+        )
+        self.assertEqual(foreground, "A mage holds a crystal. She studies its light.")
+        self.assertEqual(background, "A workshop surrounds her. The room feels calm.")
+        self.assertLess(refiner._word_count(positive), refiner.ANIMA_POSITIVE_WORD_RANGE[0])
 
     def test_long_answer_is_trimmed_at_sentence_boundaries(self):
         foreground = " ".join(
@@ -107,7 +108,8 @@ class AnimaNaturalPromptTests(unittest.TestCase):
             word_salad="year 1988 newest nsfw explicit young woman long red hair blue bandana tiled wall ropes",
             style_anchor="masterpiece, best quality, anime illustration, clean linework",
         )[0]
-        self.assertIn("reflects young, woman, long, and red", positive)
+        self.assertIn("The main subject combines young, woman, long, red", positive)
+        self.assertNotIn("The main figure reflects", positive)
         self.assertNotIn("built around year", positive)
         self.assertNotIn("built around", positive)
         self.assertNotIn("year, newest, nsfw", positive)
