@@ -17,6 +17,11 @@ DEFAULT_OLLAMA_MODEL = "autoren-darkidol-llama-3-1-8b:latest"
 DEFAULT_OLLAMA_CONTEXT_LENGTH = 8192
 OLLAMA_CONTEXT_LENGTH_CHOICES = ("2048", "4096", "8192", "16384", "32768", "65536", "131072")
 DEFAULT_STYLE_CLUSTER = 430
+FALLBACK_MODES = ("adaptive", "strict", "continue")
+DEFAULT_FALLBACK_MODE = "adaptive"
+PIPELINE_MODES = ("single", "plan_compile", "plan_compile_review")
+DEFAULT_PIPELINE_MODE = "single"
+NATURAL_FALLBACK_PROFILES = frozenset(("anima", "krea2", "z_image", "wan2_2_video"))
 SPLIT_BASE_WORD_RANGE = (10, 20)
 SPLIT_DETAIL_WORD_RANGE = (36, 40)
 Z_IMAGE_POSITIVE_WORD_RANGE = (300, 360)
@@ -45,6 +50,15 @@ TARGET_PROFILES = ("pony_v6", "illustrious", "pony_v7", "z_image", "anima", "wan
 DEFAULT_TARGET_PROFILE = "pony_v7"
 SPATIAL_TARGET_PROFILES = frozenset(("pony_v7", "z_image", "anima", "wan2_2_video", "krea2"))
 SPATIAL_INPUT_KEYS = ("left", "right", "top", "bottom")
+ANIMA_SPATIAL_NEGATIVE_TERMS = (
+    "duplicate subject",
+    "repeated character",
+    "multiple views",
+    "split screen",
+    "diptych",
+    "triptych",
+    "comic panels",
+)
 SPATIAL_DIRECTION_PATTERNS = {
     "left": re.compile(
         r"\b(?:(?:on|at|to|toward|towards|along|across)\s+(?:the\s+)?left(?:-hand)?(?:\s+side)?|"
@@ -76,6 +90,11 @@ SPATIAL_DIRECTION_WORDS = frozenset(
         ("bottom", "lower", "below", "beneath"),
     )
     for word in words
+)
+ANIMA_SPATIAL_SUBJECT_PATTERN = re.compile(
+    r"\b(?:main figure|figure|character|person|woman|man|girl|boy|hero|heroine|"
+    r"anthro|furry|humanoid|creature|cat|dog|fox|wolf)\b",
+    re.IGNORECASE,
 )
 
 OUTPUT_KEYS = (
@@ -110,6 +129,69 @@ OUTPUT_SCHEMA = {
     "required": list(RESPONSE_KEYS),
     "additionalProperties": False,
 }
+
+PLAN_STRING_KEYS = (
+    "subject",
+    "action",
+    "environment",
+    "style",
+    "composition",
+    "lighting",
+    "camera",
+)
+PLAN_LIST_KEYS = (
+    "subject_details",
+    "spatial_relations",
+    "required_elements",
+    "avoid",
+    "discarded_terms",
+)
+PLAN_KEYS = (*PLAN_STRING_KEYS, *PLAN_LIST_KEYS)
+PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        **{key: {"type": "string"} for key in PLAN_STRING_KEYS},
+        **{
+            key: {"type": "array", "items": {"type": "string"}}
+            for key in PLAN_LIST_KEYS
+        },
+    },
+    "required": list(PLAN_KEYS),
+    "additionalProperties": False,
+}
+
+REVIEW_BOOL_KEYS = ("all_required_preserved", "needs_revision")
+REVIEW_LIST_KEYS = (
+    "missing_elements",
+    "contradictions",
+    "unwanted_additions",
+    "profile_violations",
+)
+REVIEW_KEYS = (*REVIEW_BOOL_KEYS, *REVIEW_LIST_KEYS, "summary")
+REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        **{key: {"type": "boolean"} for key in REVIEW_BOOL_KEYS},
+        **{
+            key: {"type": "array", "items": {"type": "string"}}
+            for key in REVIEW_LIST_KEYS
+        },
+        "summary": {"type": "string"},
+    },
+    "required": list(REVIEW_KEYS),
+    "additionalProperties": False,
+}
+
+PLANNER_SYSTEM_INSTRUCTIONS = """You are a conservative image-prompt planner.
+Organize the supplied source into the requested JSON schema without writing the final prompt.
+You may classify weak random vocabulary as discarded_terms, but must not invent a new main motif.
+The style anchor and every supplied spatial instruction are fixed requirements.
+Return valid JSON only, with every requested key present."""
+
+REVIEWER_SYSTEM_INSTRUCTIONS = """You are a strict prompt quality reviewer.
+Compare the compiled prompt with the original source, structured plan, target-profile rules, and local findings.
+Report omissions, contradictions, unwanted additions, and profile violations without rewriting the prompt.
+Return valid JSON only, with every requested key present."""
 
 EQUINE_PATTERN = re.compile(r"\b(pony|ponies|horse|horses|equine|stallion|mare|foal)\b", re.IGNORECASE)
 MODEL_LABEL_PATTERN = re.compile(r"\bpony[\s_-]+v?\d+\b", re.IGNORECASE)
@@ -573,19 +655,31 @@ def _is_reka_flash_model(model):
     return "reka-flash" in normalized or "reka_flash" in normalized
 
 
-def _reka_output_contract():
-    return """You are a JSON-only image prompt refiner.
+def _schema_keys(output_schema):
+    return tuple(str(key) for key in output_schema.get("properties", {}).keys())
+
+
+def _reka_output_contract(output_schema=OUTPUT_SCHEMA):
+    if output_schema is OUTPUT_SCHEMA:
+        return """You are a JSON-only image prompt refiner.
 Use the user's prompt-building instructions, but return only the final JSON object.
 Do not reveal reasoning, analysis, markdown, code fences, notes, or commentary.
 Do not output <reasoning>, </reasoning>, <think>, or </think> tags.
 The JSON object must contain exactly these string keys:
 base_prompt, foreground_prompt, background_prompt, negative, report"""
+    keys = ", ".join(_schema_keys(output_schema))
+    return f"""You are a JSON-only prompt-processing assistant.
+Use the user's task instructions, but return only the final JSON object.
+Do not reveal reasoning, analysis, markdown, code fences, notes, or commentary.
+Do not output <reasoning>, </reasoning>, <think>, or </think> tags.
+The JSON object must contain exactly these keys:
+{keys}"""
 
 
-def _build_reka_prompt(prompt):
+def _build_reka_prompt(prompt, output_schema=OUTPUT_SCHEMA):
     return (
         "human: "
-        + _reka_output_contract()
+        + _reka_output_contract(output_schema)
         + "\n\nTask instructions:\n"
         + str(prompt).strip()
         + "\n\nFinal answer: return exactly one valid JSON object and nothing else."
@@ -602,7 +696,19 @@ def _strip_reasoning_blocks(value):
     return text.strip()
 
 
-def _request_ollama(ollama_url, model, prompt, seed, temperature, top_p, timeout_seconds, context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH):
+def _request_ollama(
+    ollama_url,
+    model,
+    prompt,
+    seed,
+    temperature,
+    top_p,
+    timeout_seconds,
+    context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH,
+    output_schema=OUTPUT_SCHEMA,
+    system_instructions=SYSTEM_INSTRUCTIONS,
+    num_predict=1400,
+):
     model_name = str(model).strip() or DEFAULT_OLLAMA_MODEL
     is_reka = _is_reka_flash_model(model_name)
     options = {
@@ -610,20 +716,20 @@ def _request_ollama(ollama_url, model, prompt, seed, temperature, top_p, timeout
         "temperature": float(temperature),
         "top_p": float(top_p),
         "num_ctx": _normalize_context_length(context_length),
-        "num_predict": 1400,
+        "num_predict": int(num_predict),
     }
     if is_reka:
         options["stop"] = ["<sep>", "<|endoftext|>"]
 
     payload = {
         "model": model_name,
-        "prompt": _build_reka_prompt(prompt) if is_reka else prompt,
+        "prompt": _build_reka_prompt(prompt, output_schema) if is_reka else prompt,
         "stream": False,
-        "format": OUTPUT_SCHEMA,
+        "format": output_schema,
         "options": options,
     }
     if not is_reka:
-        payload["system"] = SYSTEM_INSTRUCTIONS
+        payload["system"] = str(system_instructions)
 
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -698,6 +804,80 @@ def _validate_result(data):
     return values
 
 
+def _normalized_string_list(value, key):
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be an array")
+    result = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{key} must contain strings only")
+        clean = item.strip()
+        if clean and clean not in result:
+            result.append(clean)
+    return result
+
+
+def _validate_prompt_plan(data):
+    if not isinstance(data, dict):
+        raise ValueError("planner JSON root is not an object")
+    missing = [key for key in PLAN_KEYS if key not in data]
+    if missing:
+        raise ValueError(f"planner JSON missing keys: {', '.join(missing)}")
+    unexpected = [key for key in data if key not in PLAN_KEYS]
+    if unexpected:
+        raise ValueError(f"planner JSON has unexpected keys: {', '.join(unexpected)}")
+    plan = {}
+    for key in PLAN_STRING_KEYS:
+        if not isinstance(data[key], str):
+            raise ValueError(f"{key} must be a string")
+        plan[key] = data[key].strip()
+    for key in PLAN_LIST_KEYS:
+        plan[key] = _normalized_string_list(data[key], key)
+    if not any(plan[key] for key in PLAN_KEYS):
+        raise ValueError("planner JSON contains no usable content")
+    return plan
+
+
+def _enforce_fixed_plan_inputs(plan, style_anchor, left="", right="", top="", bottom=""):
+    plan = {key: (list(value) if isinstance(value, list) else value) for key, value in plan.items()}
+    required = plan["required_elements"]
+    for value in _curated_terms(style_anchor, limit=32, filter_low_value=False):
+        if value and value.casefold() not in {item.casefold() for item in required}:
+            required.append(value)
+    relations = plan["spatial_relations"]
+    for region, value in _spatial_values(left, right, top, bottom).items():
+        if not value:
+            continue
+        relation = f"{region}: {value}"
+        if relation.casefold() not in {item.casefold() for item in relations}:
+            relations.append(relation)
+        if value.casefold() not in {item.casefold() for item in required}:
+            required.append(value)
+    return plan
+
+
+def _validate_review(data):
+    if not isinstance(data, dict):
+        raise ValueError("reviewer JSON root is not an object")
+    missing = [key for key in REVIEW_KEYS if key not in data]
+    if missing:
+        raise ValueError(f"reviewer JSON missing keys: {', '.join(missing)}")
+    unexpected = [key for key in data if key not in REVIEW_KEYS]
+    if unexpected:
+        raise ValueError(f"reviewer JSON has unexpected keys: {', '.join(unexpected)}")
+    review = {}
+    for key in REVIEW_BOOL_KEYS:
+        if not isinstance(data[key], bool):
+            raise ValueError(f"{key} must be a boolean")
+        review[key] = data[key]
+    for key in REVIEW_LIST_KEYS:
+        review[key] = _normalized_string_list(data[key], key)
+    if not isinstance(data["summary"], str):
+        raise ValueError("summary must be a string")
+    review["summary"] = data["summary"].strip()
+    return review
+
+
 def _normalize_style_cluster(style_cluster):
     try:
         value = int(style_cluster)
@@ -721,6 +901,20 @@ def _normalize_target_profile(target_profile):
     return DEFAULT_TARGET_PROFILE
 
 
+def _normalize_fallback_mode(fallback_mode):
+    mode = str(fallback_mode).strip().lower()
+    if mode in FALLBACK_MODES:
+        return mode
+    return DEFAULT_FALLBACK_MODE
+
+
+def _normalize_pipeline_mode(pipeline_mode):
+    mode = str(pipeline_mode).strip().lower()
+    if mode in PIPELINE_MODES:
+        return mode
+    return DEFAULT_PIPELINE_MODE
+
+
 def _spatial_values(left="", right="", top="", bottom=""):
     return {
         "left": str(left).strip(),
@@ -736,12 +930,21 @@ def _spatial_context(target_profile, left="", right="", top="", bottom=""):
         return ""
 
     values = _spatial_values(left, right, top, bottom)
-    labels = {
-        "left": "Left side",
-        "right": "Right side",
-        "top": "Top area",
-        "bottom": "Bottom area",
-    }
+    labels = (
+        {
+            "left": "Left placement in the shared frame",
+            "right": "Right placement in the shared frame",
+            "top": "Upper placement in the shared frame",
+            "bottom": "Lower placement in the shared frame",
+        }
+        if profile == "anima"
+        else {
+            "left": "Left side",
+            "right": "Right side",
+            "top": "Top area",
+            "bottom": "Bottom area",
+        }
+    )
     lines = [f'{labels[key]}: {values[key]}' for key in SPATIAL_INPUT_KEYS if values[key]]
     if not lines:
         return ""
@@ -751,6 +954,16 @@ def _spatial_context(target_profile, left="", right="", top="", bottom=""):
         if profile == "pony_v7"
         else ""
     )
+    anima_note = (
+        "\nFor Anima, all placements belong to one continuous full-frame image with one camera view, "
+        "one perspective, and consistent lighting. Never turn the placements into panels, a split screen, "
+        "a diptych, a triptych, a collage, or separate close-up and full-body views. Describe the main figure "
+        "exactly once. If several inputs repeat the same character or its attributes, merge them into that one "
+        "figure and arrange the surrounding objects or scenery around it. Preserve one identity, outfit, body "
+        "scale, pose, and silhouette across the whole composition."
+        if profile == "anima"
+        else ""
+    )
     return (
         "Spatial composition hints:\n"
         + "\n".join(lines)
@@ -758,6 +971,7 @@ def _spatial_context(target_profile, left="", right="", top="", bottom=""):
         "Keep their broad orientation recognizable while allowing natural overlap, transitions, and visual balance. "
         "The random word salad is global guidance and may influence every region."
         + pony_note
+        + anima_note
     )
 
 
@@ -801,6 +1015,15 @@ def _spatial_region_is_integrated(region, detail, result_text):
     return False
 
 
+def _spatial_content_is_present(detail, result_text):
+    content_tokens = _spatial_content_tokens(detail)
+    if not content_tokens:
+        return False
+    required_matches = min(3, len(content_tokens))
+    result_tokens = set(_spatial_content_tokens(result_text))
+    return sum(token in result_tokens for token in content_tokens) >= required_matches
+
+
 def _spatial_fallback_text(
     target_profile,
     left="",
@@ -809,14 +1032,30 @@ def _spatial_fallback_text(
     bottom="",
     existing_text="",
 ):
-    if _normalize_target_profile(target_profile) not in SPATIAL_TARGET_PROFILES:
+    profile = _normalize_target_profile(target_profile)
+    if profile not in SPATIAL_TARGET_PROFILES:
         return ""
     values = _spatial_values(left, right, top, bottom)
-    prefixes = {
-        "left": "On the left",
-        "right": "On the right",
-        "top": "Across the top",
-        "bottom": "Along the bottom",
+    prefixes = (
+        {
+            "left": "Within one continuous composition on the left",
+            "right": "Within the same continuous composition on the right",
+            "top": "Within the same continuous composition across the upper area",
+            "bottom": "Within the same continuous composition along the lower area",
+        }
+        if profile == "anima"
+        else {
+            "left": "On the left",
+            "right": "On the right",
+            "top": "Across the top",
+            "bottom": "Along the bottom",
+        }
+    )
+    anima_subject_positions = {
+        "left": "The same main figure occupies the left side of the single continuous composition",
+        "right": "The same main figure occupies the right side of the single continuous composition",
+        "top": "The same main figure occupies the upper area of the single continuous composition",
+        "bottom": "The same main figure occupies the lower area of the single continuous composition",
     }
     sentences = []
     for key in SPATIAL_INPUT_KEYS:
@@ -827,12 +1066,42 @@ def _spatial_fallback_text(
         detail = re.sub(r"[\s.!?;,]+$", "", re.sub(r"\s+", " ", values[key])).strip()
         if not detail:
             continue
+        if (
+            profile == "anima"
+            and existing_text
+            and ANIMA_SPATIAL_SUBJECT_PATTERN.search(detail)
+            and _spatial_content_is_present(detail, existing_text)
+        ):
+            sentences.append(f"{anima_subject_positions[key]}.")
+            continue
         sentences.append(f"{prefixes[key]}, {detail}.")
     return " ".join(sentences)
 
 
-def _apply_spatial_result(result, target_profile, left="", right="", top="", bottom=""):
+def _with_anima_spatial_negative(value):
+    terms = [part.strip() for part in str(value).split(",") if part.strip()]
+    seen = {term.casefold() for term in terms}
+    for term in ANIMA_SPATIAL_NEGATIVE_TERMS:
+        if term.casefold() not in seen:
+            terms.append(term)
+            seen.add(term.casefold())
+    return ", ".join(terms)
+
+
+def _apply_spatial_result(
+    result,
+    target_profile,
+    left="",
+    right="",
+    top="",
+    bottom="",
+    fallback_mode=DEFAULT_FALLBACK_MODE,
+):
     _positive, negative, report, base_prompt, foreground_prompt, background_prompt = result
+    profile = _normalize_target_profile(target_profile)
+    has_spatial_input = any(_spatial_values(left, right, top, bottom).values())
+    if profile == "anima" and has_spatial_input:
+        negative = _with_anima_spatial_negative(negative)
     result_text = " ".join(
         str(part).strip()
         for part in (base_prompt, foreground_prompt, background_prompt)
@@ -847,7 +1116,9 @@ def _apply_spatial_result(result, target_profile, left="", right="", top="", bot
         existing_text=result_text,
     )
     if not spatial_text:
-        return result
+        return _positive, negative, report, base_prompt, foreground_prompt, background_prompt
+    if profile in NATURAL_FALLBACK_PROFILES and _normalize_fallback_mode(fallback_mode) == "strict":
+        raise ValueError("strict mode: Ollama omitted one or more connected spatial inputs")
 
     background_prompt = " ".join(
         part for part in (spatial_text, str(background_prompt).strip()) if part
@@ -1146,8 +1417,18 @@ def _clean_report(report, target_profile, word_salad, style_anchor):
     return f"Built one {profile_label} prompt from {core} and removed weak filler terms"
 
 
-def _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster=DEFAULT_STYLE_CLUSTER):
+def _postprocess_result(
+    values,
+    target_profile,
+    word_salad,
+    style_anchor,
+    style_cluster=DEFAULT_STYLE_CLUSTER,
+    fallback_mode=DEFAULT_FALLBACK_MODE,
+    trace=None,
+):
     target_profile = _normalize_target_profile(target_profile)
+    mode = _normalize_fallback_mode(fallback_mode)
+    trace = trace if trace is not None else {}
     allow_equine = _source_allows_equine(word_salad, style_anchor)
     style_cluster = _normalize_style_cluster(style_cluster)
     if isinstance(values, dict):
@@ -1184,6 +1465,8 @@ def _postprocess_result(values, target_profile, word_salad, style_anchor, style_
             word_salad,
             style_anchor,
             provided if any(provided.values()) else None,
+            mode,
+            trace,
         )
         positive = _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt)
         negative = ""
@@ -1211,6 +1494,8 @@ def _postprocess_result(values, target_profile, word_salad, style_anchor, style_
             word_salad,
             style_anchor,
             provided if any(provided.values()) else None,
+            mode,
+            trace,
         )
         positive = _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt)
     elif target_profile == "krea2":
@@ -1224,15 +1509,21 @@ def _postprocess_result(values, target_profile, word_salad, style_anchor, style_
             word_salad,
             style_anchor,
             provided if any(provided.values()) else None,
+            mode,
+            trace,
         )
         positive = _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt)
     elif target_profile == "wan2_2_video":
-        if not base_prompt:
-            base_prompt = "cinematic video, coherent lighting, stable camera, consistent visual style"
-        if not foreground_prompt:
-            foreground_prompt = positive or "A clearly visible subject performs one continuous, readable action."
-        if not background_prompt:
-            background_prompt = "The environment remains spatially consistent while natural secondary motion supports the action."
+        source = " ".join(part for part in (word_salad, positive) if part)
+        base_prompt = _process_natural_section(
+            target_profile, base_prompt, source, "base", 80, mode, trace
+        )
+        foreground_prompt = _process_natural_section(
+            target_profile, foreground_prompt or positive, source, "foreground", 120, mode, trace
+        )
+        background_prompt = _process_natural_section(
+            target_profile, background_prompt, source, "background", 100, mode, trace
+        )
         positive = _join_positive_parts(target_profile, base_prompt, foreground_prompt, background_prompt)
     else:
         base_prompt, foreground_prompt, background_prompt = _structured_pony_v7_parts(
@@ -2289,15 +2580,6 @@ def _ensure_anima_emotional_ending(value, original_value, fallback, min_words, m
     return " ".join((*body, *ending))
 
 
-def _anima_subject_phrase(terms):
-    cleaned = [
-        _clean_z_image_text(term).lower()
-        for term in terms
-        if _clean_z_image_text(term) and not _is_anima_fallback_meta_term(term)
-    ]
-    return _sentence_from_terms(cleaned[:4], "a clearly defined anime figure")
-
-
 def _is_anima_fallback_meta_term(term):
     clean = _clean_z_image_text(term).lower()
     compact = re.sub(r"[^a-z0-9]+", "_", clean).strip("_")
@@ -2308,43 +2590,6 @@ def _is_anima_fallback_meta_term(term):
     if re.fullmatch(r"score_\d+(?:_up)?", compact):
         return True
     return compact in ANIMA_FALLBACK_META_TERMS or clean in ANIMA_FALLBACK_META_TERMS
-
-
-def _anima_visual_fallback_terms(terms):
-    return [term for term in terms if not _is_anima_fallback_meta_term(term)]
-
-
-def _anima_foreground_fallback(foreground_terms, source_terms):
-    visual_terms = _anima_visual_fallback_terms(foreground_terms) or _anima_visual_fallback_terms(source_terms)
-    subject = _anima_subject_phrase(visual_terms)
-    objects = _anima_subject_phrase(visual_terms[4:8])
-    return (
-        f"The main figure reflects {subject} through a clear and readable silhouette. "
-        "The face has carefully shaped features, attentive eyes, and a focused direction of gaze. "
-        "Hair, skin, fur, or other visible surfaces carry distinct color and fine texture. "
-        "Clothing and accessories use believable layers, visible seams, firm edges, and material contrast. "
-        "The pose shows balanced weight, clear limb placement, and an action that reads immediately. "
-        f"Important nearby objects reflect {objects} and connect directly with the figure's hands or movement. "
-        "Small highlights, folds, worn marks, loose strands, and contact shadows strengthen the focal details. "
-        "The camera keeps the figure dominant while allowing every important object to remain understandable. "
-        "The expression is easy to read through the eyes, mouth, shoulders, and direction of movement. "
-        "Body language gives the scene a personal motive instead of a neutral display pose."
-    )
-
-
-def _anima_background_fallback(background_terms, source_terms):
-    visual_terms = _anima_visual_fallback_terms(background_terms) or _anima_visual_fallback_terms(source_terms)
-    setting = _anima_subject_phrase(visual_terms)
-    return (
-        f"Around the figure, details such as {setting} create a setting with recognizable shapes and surfaces. "
-        "Nearby props occupy the foreground and middle distance without hiding the main action. "
-        "Architecture, terrain, furniture, plants, or machinery establish scale and a believable location. "
-        "A visible light source creates clean highlights, readable shadows, and a controlled color palette. "
-        "Distant forms become softer and smaller, giving the illustration clear depth and atmosphere. "
-        "Air, mist, dust, reflections, or weather connect the figure naturally with the surrounding space. "
-        "The atmosphere connects the figure's expression with the light, color, and stillness of the environment. "
-        "Specific visual choices keep the image coherent, personal, and quietly memorable."
-    )
 
 
 def _anima_base_prompt_from_provided(provided_base, word_salad, style_anchor, style_terms):
@@ -2370,8 +2615,17 @@ def _anima_base_prompt_from_provided(provided_base, word_salad, style_anchor, st
     )
 
 
-def _anima_prompt_parts(value, word_salad, style_anchor, provided=None):
+def _anima_prompt_parts(
+    value,
+    word_salad,
+    style_anchor,
+    provided=None,
+    fallback_mode=DEFAULT_FALLBACK_MODE,
+    trace=None,
+):
     provided = provided or {}
+    trace = trace if trace is not None else {}
+    mode = _normalize_fallback_mode(fallback_mode)
     combined_source = " ".join(
         str(part)
         for part in (
@@ -2388,34 +2642,41 @@ def _anima_prompt_parts(value, word_salad, style_anchor, provided=None):
         value,
     )
     source_terms = _curated_terms(combined_source, limit=48, filter_low_value=False)
-    base_prompt = _anima_base_prompt_from_provided(
-        provided.get("base_prompt", ""),
-        word_salad,
-        style_anchor,
-        style_terms,
-    )
-
-    foreground_fallback = _anima_foreground_fallback(foreground_terms, source_terms)
-    foreground_prompt = _fit_anima_prose_ai_first(
-        provided.get("foreground_prompt", ""),
-        foreground_fallback,
-        *ANIMA_FOREGROUND_WORD_RANGE,
-    )
-
-    background_fallback = _anima_background_fallback(background_terms, all_terms or source_terms)
-    provided_background = provided.get("background_prompt", "")
-    background_prompt = _fit_anima_prose_ai_first(
-        provided_background,
-        background_fallback,
-        *ANIMA_BACKGROUND_WORD_RANGE,
-    )
-    if not _anima_ai_prose_is_usable(provided_background):
-        background_prompt = _ensure_anima_emotional_ending(
-            background_prompt,
-            provided_background,
-            background_fallback,
-            *ANIMA_BACKGROUND_WORD_RANGE,
+    if mode == "continue":
+        base_prompt = _anima_tag_text(provided.get("base_prompt", ""), limit=24)
+        anchor = str(style_anchor).strip()
+        if anchor and not base_prompt.casefold().startswith(anchor.casefold()):
+            base_prompt = f"{anchor}, {base_prompt}" if base_prompt else anchor
+        trace["base"] = "preserved" if base_prompt else "missing"
+    else:
+        base_prompt = _anima_base_prompt_from_provided(
+            provided.get("base_prompt", ""),
+            word_salad,
+            style_anchor,
+            style_terms,
         )
+        trace["base"] = "preserved" if provided.get("base_prompt", "") else "rebuilt"
+
+    foreground_prompt = _process_natural_section(
+        "anima",
+        provided.get("foreground_prompt", ""),
+        combined_source,
+        "foreground",
+        ANIMA_FOREGROUND_WORD_RANGE[1],
+        mode,
+        trace,
+    )
+    provided_background = provided.get("background_prompt", "")
+    background_source = " ".join(background_terms or all_terms or source_terms) or combined_source
+    background_prompt = _process_natural_section(
+        "anima",
+        provided_background,
+        background_source,
+        "background",
+        ANIMA_BACKGROUND_WORD_RANGE[1],
+        mode,
+        trace,
+    )
 
     return base_prompt, foreground_prompt, background_prompt
 
@@ -2490,61 +2751,17 @@ def _fit_krea2_prose(value, fallback, min_words, max_words):
     return " ".join(fitted)
 
 
-def _krea2_subject_text(terms, fallback):
-    cleaned = [_clean_z_image_text(term).lower() for term in terms if _clean_z_image_text(term)]
-    return _sentence_from_terms(cleaned[:8], fallback)
-
-
-def _krea2_foreground_fallback(foreground_terms, source_terms):
-    visual_terms = foreground_terms or source_terms
-    subject = _krea2_subject_text(visual_terms, "a clearly defined main subject")
-    details = _krea2_subject_text(visual_terms[8:14], "distinctive clothing, surfaces, and nearby objects")
-    return (
-        f"{subject[:1].upper() + subject[1:]} forms one coherent and immediately readable main subject. "
-        "Its quantity, scale, silhouette, pose, and direction of attention are visually unambiguous. "
-        "The action uses believable body weight and clear contact with the surrounding objects. "
-        "Colors are specific and consistent across skin, hair, fabric, metal, glass, wood, or other visible surfaces. "
-        f"Fine details include {details}, with recognizable shapes, material texture, seams, edges, reflections, and signs of wear. "
-        "Hands, limbs, facial features, held props, and overlapping forms remain anatomically and spatially understandable. "
-        "Any requested lettering appears exactly as quoted on a clearly identified surface."
-    )
-
-
-def _krea2_background_fallback(background_terms, source_terms):
-    visual_terms = background_terms or source_terms
-    setting = _krea2_subject_text(visual_terms, "a concrete environment related to the central idea")
-    return (
-        f"The environment includes {setting}, with recognizable architecture, terrain, furniture, plants, machinery, or practical props. "
-        "Nearby objects sit in front of and beside the subject, while smaller distant forms establish scale and depth. "
-        "A visible light source creates consistent highlights, contact shadows, reflections, and a controlled color atmosphere. "
-        "Weather, dust, mist, water, or other environmental effects remain physically connected to the surfaces and open space. "
-        "The background supports the focal action without hiding important shapes or introducing unrelated objects."
-    )
-
-
-def _krea2_base_prompt(provided_base, style_anchor):
-    anchor = str(style_anchor).strip()
-    provided = str(provided_base).strip()
-    if anchor and provided.casefold().startswith(anchor.casefold()):
-        provided = provided[len(anchor) :].lstrip(" ,.;:-")
-    fallback = (
-        "A carefully composed image uses a clear camera angle, controlled focal depth, coherent lighting, "
-        "a deliberate color palette, and realistic material response."
-    )
-    if not anchor:
-        return _fit_krea2_prose(provided, fallback, *KREA2_BASE_WORD_RANGE)
-
-    anchor_words = _word_count(anchor)
-    if anchor_words >= KREA2_BASE_WORD_RANGE[1]:
-        return anchor
-    tail_min = max(3, KREA2_BASE_WORD_RANGE[0] - anchor_words)
-    tail_max = max(tail_min, KREA2_BASE_WORD_RANGE[1] - anchor_words)
-    tail = _fit_krea2_prose(provided, fallback, tail_min, tail_max)
-    return f"{anchor}, {tail}" if tail else anchor
-
-
-def _krea2_prompt_parts(value, word_salad, style_anchor, provided=None):
+def _krea2_prompt_parts(
+    value,
+    word_salad,
+    style_anchor,
+    provided=None,
+    fallback_mode=DEFAULT_FALLBACK_MODE,
+    trace=None,
+):
     provided = provided or {}
+    trace = trace if trace is not None else {}
+    mode = _normalize_fallback_mode(fallback_mode)
     source_parts = [
         word_salad,
         provided.get("foreground_prompt", ""),
@@ -2563,16 +2780,42 @@ def _krea2_prompt_parts(value, word_salad, style_anchor, provided=None):
         "",
     )
     source_terms = _curated_terms(combined_source, limit=48, filter_low_value=False)
-    base_prompt = _krea2_base_prompt(provided.get("base_prompt", ""), style_anchor)
-    foreground_prompt = _fit_krea2_prose(
+    anchor = str(style_anchor).strip()
+    raw_base = str(provided.get("base_prompt", "")).strip()
+    if anchor and raw_base.casefold().startswith(anchor.casefold()):
+        raw_base = raw_base[len(anchor) :].lstrip(" ,.;:-")
+    if anchor and not raw_base:
+        base_prompt = anchor
+        trace["base"] = "preserved"
+    else:
+        base_tail = _process_natural_section(
+            "krea2",
+            raw_base,
+            " ".join(part for part in (anchor, combined_source) if part),
+            "base",
+            max(1, KREA2_BASE_WORD_RANGE[1] - _word_count(anchor)),
+            mode,
+            trace,
+        )
+        base_prompt = f"{anchor}, {base_tail}" if anchor and base_tail else (anchor or base_tail)
+    foreground_prompt = _process_natural_section(
+        "krea2",
         provided.get("foreground_prompt", ""),
-        _krea2_foreground_fallback(foreground_terms, source_terms),
-        *KREA2_FOREGROUND_WORD_RANGE,
+        combined_source,
+        "foreground",
+        KREA2_FOREGROUND_WORD_RANGE[1],
+        mode,
+        trace,
     )
-    background_prompt = _fit_krea2_prose(
+    background_source = " ".join(background_terms or all_terms or source_terms) or combined_source
+    background_prompt = _process_natural_section(
+        "krea2",
         provided.get("background_prompt", ""),
-        _krea2_background_fallback(background_terms, all_terms or source_terms),
-        *KREA2_BACKGROUND_WORD_RANGE,
+        background_source,
+        "background",
+        KREA2_BACKGROUND_WORD_RANGE[1],
+        mode,
+        trace,
     )
     return base_prompt, foreground_prompt, background_prompt
 
@@ -3166,93 +3409,104 @@ def _clean_z_image_text(value):
     return text[:1].upper() + text[1:]
 
 
-def _z_image_terms(word_salad, style_anchor, value, limit=18):
-    source = f"{style_anchor} {word_salad}"
-    terms = _curated_terms(source, limit=limit, filter_low_value=False)
-    if len(terms) < 4:
-        terms = _curated_terms(f"{source} {value}", limit=limit, filter_low_value=False)
-    result = []
+def _clean_natural_prose(target_profile, value):
+    profile = _normalize_target_profile(target_profile)
+    if profile == "anima":
+        return _clean_anima_prose(value)
+    if profile in ("krea2", "z_image"):
+        return _clean_krea2_prose(value) if profile == "krea2" else _clean_z_image_text(value)
+    if profile == "wan2_2_video":
+        return _clean_anima_prose(value)
+    return re.sub(r"\s+", " ", str(value)).strip()
+
+
+def _natural_prose_is_usable(target_profile, value):
+    text = _clean_natural_prose(target_profile, value)
+    if _word_count(text) < 6 or ANIMA_META_PROSE_PATTERN.search(text):
+        return False
+    if text.count(",") > max(8, _word_count(text) // 4):
+        return False
+    return bool(re.search(r"[A-Za-z]{3}", text))
+
+
+def _trim_natural_prose(value, max_words):
+    text = str(value).strip()
+    if _word_count(text) <= max_words:
+        return text
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+    fitted = []
+    for sentence in sentences:
+        candidate = " ".join((*fitted, sentence))
+        if fitted and _word_count(candidate) > max_words:
+            break
+        if not fitted and _word_count(sentence) > max_words:
+            return " ".join(sentence.split()[:max_words]).rstrip(" ,.;:-") + "."
+        fitted.append(sentence)
+    return " ".join(fitted) if fitted else " ".join(text.split()[:max_words]).rstrip(" ,.;:-") + "."
+
+
+def _adaptive_source_sentence(source, section):
+    terms = _curated_terms(source, limit=24, filter_low_value=False)
+    cleaned = []
     seen = set()
     for term in terms:
-        clean = _clean_z_image_text(term)
-        key = clean.lower()
-        if not clean or key in seen or Z_IMAGE_FORBIDDEN_TAG_PATTERN.fullmatch(key):
+        value = _clean_z_image_text(term).lower()
+        key = value.casefold()
+        if not value or key in seen or _is_anima_fallback_meta_term(value):
             continue
         seen.add(key)
-        result.append(clean)
-    return result
+        cleaned.append(value)
+    if not cleaned:
+        direct = _clean_z_image_text(source)
+        if direct:
+            return direct.rstrip(".") + "."
+        return ""
+    selected = cleaned[:14]
+    phrase = ", ".join(selected[:-1]) + (f", and {selected[-1]}" if len(selected) > 1 else selected[0])
+    prefix = {
+        "base": "The visual direction uses",
+        "foreground": "The main subject combines",
+        "background": "The surrounding scene includes",
+    }[section]
+    return f"{prefix} {phrase}."
 
 
-def _z_image_section_is_usable(value, min_words=18):
-    text = _clean_z_image_text(value)
-    if _word_count(text) < min_words:
-        return False
-    comma_count = text.count(",")
-    sentence_count = len([part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()])
-    return sentence_count >= 1 and comma_count <= max(8, _word_count(text) // 8)
+def _process_natural_section(
+    target_profile,
+    value,
+    fallback_source,
+    section,
+    max_words,
+    fallback_mode,
+    trace,
+):
+    mode = _normalize_fallback_mode(fallback_mode)
+    cleaned = _clean_natural_prose(target_profile, value)
+    if mode == "continue":
+        trace[section] = "preserved" if cleaned else "missing"
+        return cleaned
+    if _natural_prose_is_usable(target_profile, cleaned):
+        trace[section] = "preserved"
+        return _trim_natural_prose(cleaned, max_words)
+    if mode == "strict":
+        reason = "empty" if not cleaned else "not concrete natural prose"
+        raise ValueError(f"{target_profile} {section}_prompt is {reason}")
+    rebuilt = _adaptive_source_sentence(fallback_source, section)
+    trace[section] = "rebuilt"
+    return _trim_natural_prose(rebuilt, max_words)
 
 
-def _z_image_foreground_fallback(word_salad, style_anchor, value):
-    terms = _z_image_terms(word_salad, style_anchor, value, limit=12)
-    subject = _sentence_from_terms(terms[:8], "a clearly defined subject based on the provided idea")
-    return (
-        f"{subject[:1].upper() + subject[1:]} appears as a real visual presence with a readable pose, "
-        "clear body language, visible clothing or surface texture, and small details that make the concept feel "
-        "intentional. The action is easy to understand at a glance, with natural proportions, believable materials, "
-        "and a few distinctive features that guide the viewer's attention. The angle of the head or object, the "
-        "placement of the hands or edges, the weight of the body, and the condition of fabric, metal, skin, fur, "
-        "glass, dust, water, or other visible surfaces are clear in the foreground. Small cues such as tension in "
-        "the posture, direction of the gaze, contact with nearby props, reflected highlights, worn edges, scratches, "
-        "damp areas, loose strands, or other local details make the main figure or object feel present inside the scene."
-    )
-
-
-def _z_image_background_fallback(word_salad, style_anchor, value):
-    _, background_terms, _, all_terms = _split_pony_v7_terms(word_salad, style_anchor, "")
-    background = _sentence_from_terms(
-        _z_image_terms(" ".join(background_terms), "", "", limit=8) or _z_image_terms(" ".join(all_terms), "", "", limit=6),
-        "a concrete environment with visible depth and recognizable surroundings",
-    )
-    return (
-        f"The scene takes place in {background}. The environment supports the subject with a clear foreground, "
-        "middle ground, and distant background, using recognizable surfaces, objects, architecture, terrain, or decor. "
-        "Light sources and atmosphere are visible inside the scene, so the image feels grounded rather than empty. "
-        "The space includes floor or ground texture, wall or horizon shape, nearby props, distant silhouettes, "
-        "openings, furniture, signage, vegetation, machinery, weather, smoke, mist, dust, or reflections where they "
-        "fit the source idea. The background contains concrete objects at different distances, visible occlusion, "
-        "scale changes, and a sense of air "
-        "between the subject and the farthest shapes. Mention how the environment affects the mood through color, "
-        "temperature, shadow direction, and the kind of light falling across the scene."
-    )
-
-
-def _z_image_base_fallback(word_salad, style_anchor, value):
-    terms = _z_image_terms(word_salad, style_anchor, value, limit=10)
-    mood = _sentence_from_terms(terms[:4], "the core idea")
-    return (
-        f"The visual treatment frames {mood} with cinematic composition, atmospheric lighting, realistic shadows, "
-        "and a coherent color mood. The camera language suggests an eye-level view, three-quarter composition, "
-        "85mm lens, shallow depth of field, or wide-angle framing when it fits the scene. The style reads as a "
-        "coherent visual direction, such as photographic realism, painterly fantasy illustration, polished "
-        "anime-inspired rendering, or editorial concept art. Contrast, color palette, texture handling, and the "
-        "relationship between sharp focal areas and softer peripheral details are visible in the final image."
-    )
-
-
-def _extend_z_image_section(section, fallback, min_words):
-    section = _clean_z_image_text(section)
-    fallback = _clean_z_image_text(fallback)
-    if not section:
-        return fallback
-    if _word_count(section) >= min_words:
-        return section
-    if fallback and fallback.lower() not in section.lower():
-        section = f"{section}. {fallback}".strip(" .") + "."
-    return _clean_z_image_text(section)
-
-
-def _z_image_prompt_parts(value, word_salad, style_anchor, provided=None):
+def _z_image_prompt_parts(
+    value,
+    word_salad,
+    style_anchor,
+    provided=None,
+    fallback_mode=DEFAULT_FALLBACK_MODE,
+    trace=None,
+):
     provided = provided or {}
+    trace = trace if trace is not None else {}
+    mode = _normalize_fallback_mode(fallback_mode)
     combined = _join_positive_parts(
         "z_image",
         provided.get("base_prompt", ""),
@@ -3260,24 +3514,43 @@ def _z_image_prompt_parts(value, word_salad, style_anchor, provided=None):
         provided.get("background_prompt", ""),
     ) or str(value)
 
-    foreground = _clean_z_image_text(provided.get("foreground_prompt", ""))
-    foreground_fallback = _z_image_foreground_fallback(word_salad, style_anchor, "")
-    if not _z_image_section_is_usable(foreground):
-        foreground = foreground_fallback
+    foreground = _process_natural_section(
+        "z_image",
+        provided.get("foreground_prompt", ""),
+        word_salad or combined,
+        "foreground",
+        Z_IMAGE_FOREGROUND_WORD_RANGE[1],
+        mode,
+        trace,
+    )
 
-    background = _clean_z_image_text(provided.get("background_prompt", ""))
-    background_fallback = _z_image_background_fallback(word_salad, style_anchor, "")
-    if not _z_image_section_is_usable(background):
-        background = background_fallback
+    background = _process_natural_section(
+        "z_image",
+        provided.get("background_prompt", ""),
+        word_salad or combined,
+        "background",
+        Z_IMAGE_BACKGROUND_WORD_RANGE[1],
+        mode,
+        trace,
+    )
 
     anchor = str(style_anchor).strip()
     raw_base = str(provided.get("base_prompt", "")).strip()
     if anchor and raw_base.casefold().startswith(anchor.casefold()):
         raw_base = raw_base[len(anchor) :].lstrip(" ,.;:-")
-    base = _clean_z_image_text(raw_base)
-    base_fallback = _z_image_base_fallback(word_salad, "" if anchor else style_anchor, "")
-    if not _z_image_section_is_usable(base, min_words=15):
-        base = base_fallback
+    if anchor and not raw_base:
+        base = ""
+        trace["base"] = "preserved"
+    else:
+        base = _process_natural_section(
+            "z_image",
+            raw_base,
+            " ".join(part for part in (style_anchor, word_salad, combined) if part),
+            "base",
+            max(1, Z_IMAGE_BASE_WORD_RANGE[1] - _word_count(anchor)),
+            mode,
+            trace,
+        )
     if anchor:
         base = f"{anchor}, {base}" if base else anchor
 
@@ -3545,6 +3818,142 @@ def _profile_positive_fallback(target_profile, word_salad, style_anchor, style_c
     )
 
 
+def _partial_response_fields(response_text):
+    text = str(response_text).strip()
+    if not text:
+        return {}
+    data = None
+    try:
+        candidate = _extract_json_object(text)
+        if isinstance(candidate, dict):
+            data = candidate
+    except ValueError:
+        data = None
+    fields = {}
+    if data is not None:
+        for key in (*RESPONSE_KEYS, "positive"):
+            value = str(data.get(key, "")).strip()
+            if value:
+                fields[key] = value
+        return fields
+    for key in (*RESPONSE_KEYS, "positive"):
+        match = re.search(
+            rf'["\']?{re.escape(key)}["\']?\s*[:=]\s*["\']([^"\'\r\n}}]+)',
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            fields[key] = match.group(1).strip(" ,.;")
+    return fields
+
+
+def _continue_raw_candidate(responses):
+    candidates = []
+    for _stage, response in responses:
+        text = re.sub(r"(?s)^```(?:json)?\s*|\s*```$", "", str(response).strip())
+        if not text or ("{" in text and "}" in text) or any(f'"{key}"' in text for key in RESPONSE_KEYS):
+            continue
+        cleaned = _clean_anima_prose(text)
+        if cleaned and _word_count(cleaned) >= 2:
+            candidates.append(cleaned)
+    return max(candidates, key=_word_count, default="")
+
+
+def _with_processing_report(result, stage, fallback_mode, trace=None, ignored_error=""):
+    positive, negative, report, base_prompt, foreground_prompt, background_prompt = result
+    mode = _normalize_fallback_mode(fallback_mode)
+    actions = trace or {}
+    action_text = ", ".join(
+        f"{key}={actions.get(key, 'unchanged')}" for key in ("base", "foreground", "background")
+    )
+    detail = f"Ollama stage={stage}; fallback_mode={mode}; {action_text}"
+    if ignored_error:
+        detail += f"; ignored_error={re.sub(r'\s+', ' ', str(ignored_error)).strip()}"
+    report = f"{str(report).rstrip(' .')}. {detail}." if report else detail + "."
+    return positive, negative, report, base_prompt, foreground_prompt, background_prompt
+
+
+def _continue_result(
+    target_profile,
+    word_salad,
+    style_anchor,
+    responses,
+    error_message,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
+    profile = _normalize_target_profile(target_profile)
+    ranked = []
+    for order, (stage, response) in enumerate(responses):
+        fields = _partial_response_fields(response)
+        if fields:
+            ranked.append((-len(fields), order, stage, fields))
+    ranked.sort()
+    merged = {}
+    used_stages = []
+    for _score, _order, stage, fields in ranked:
+        if stage not in used_stages:
+            used_stages.append(stage)
+        for key, value in fields.items():
+            merged.setdefault(key, value)
+
+    spatial = _spatial_values(left, right, top, bottom)
+    foreground_source = merged.get("foreground_prompt") or merged.get("positive") or _continue_raw_candidate(responses)
+    used_spatial_key = ""
+    if not foreground_source:
+        foreground_source = str(word_salad).strip()
+    if not foreground_source:
+        for key in SPATIAL_INPUT_KEYS:
+            if spatial[key]:
+                foreground_source = _spatial_fallback_text(
+                    profile,
+                    **{key: spatial[key]},
+                )
+                used_spatial_key = key
+                break
+
+    raw_base = merged.get("base_prompt", "")
+    anchor = str(style_anchor).strip()
+    if profile == "anima":
+        base_prompt = _anima_tag_text(raw_base, limit=24)
+    else:
+        base_prompt = _clean_natural_prose(profile, raw_base)
+    if anchor and not base_prompt.casefold().startswith(anchor.casefold()):
+        base_prompt = f"{anchor}, {base_prompt}" if base_prompt else anchor
+
+    foreground_prompt = _clean_natural_prose(profile, foreground_source)
+    background_prompt = _clean_natural_prose(profile, merged.get("background_prompt", ""))
+    remaining_spatial = {
+        key: value for key, value in spatial.items() if value and key != used_spatial_key
+    }
+    if remaining_spatial:
+        spatial_text = _spatial_fallback_text(profile, existing_text="", **remaining_spatial)
+        background_prompt = " ".join(part for part in (background_prompt, spatial_text) if part)
+
+    negative = merged.get("negative", "")
+    negative = "" if profile == "z_image" else _with_negative_baseline(profile, negative)
+    positive = _join_positive_parts(profile, base_prompt, foreground_prompt, background_prompt)
+    missing = [
+        name
+        for name, value in (
+            ("base_prompt", base_prompt),
+            ("foreground_prompt", foreground_prompt),
+            ("background_prompt", background_prompt),
+        )
+        if not value
+    ]
+    sources = ", ".join(used_stages) if used_stages else ("raw prose" if _continue_raw_candidate(responses) else "connected inputs")
+    report = (
+        f"Continued with available content from {sources}; fallback_mode=continue; "
+        f"missing={', '.join(missing) if missing else 'none'}; "
+        f"ignored_error={re.sub(r'\s+', ' ', str(error_message)).strip()}."
+    )
+    result = (positive, negative, report, base_prompt, foreground_prompt, background_prompt)
+    return _apply_spatial_result(result, profile, left, right, top, bottom, fallback_mode="continue")
+
+
 def _local_fallback_result(
     target_profile,
     word_salad,
@@ -3555,18 +3964,48 @@ def _local_fallback_result(
     right="",
     top="",
     bottom="",
+    fallback_mode=DEFAULT_FALLBACK_MODE,
+    stage="local",
 ):
     target_profile = _normalize_target_profile(target_profile)
-    values = {
-        "positive": _profile_positive_fallback(target_profile, word_salad, style_anchor, style_cluster),
-        "negative": ", ".join(NEGATIVE_BASELINES[target_profile]),
-        "report": (
-            "Ollama returned invalid JSON, so a local fallback prompt was built from curated input terms. "
-            f"Parser detail: {error_message}"
-        ),
-    }
-    result = _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
-    return _apply_spatial_result(result, target_profile, left, right, top, bottom)
+    fallback_source = word_salad
+    if target_profile == "anima":
+        regional_source = " ".join(
+            value for value in _spatial_values(left, right, top, bottom).values() if value
+        )
+        fallback_source = " ".join(
+            value for value in (regional_source, str(word_salad).strip()) if value
+        )
+    if target_profile in NATURAL_FALLBACK_PROFILES:
+        values = {
+            "base_prompt": "",
+            "foreground_prompt": "",
+            "background_prompt": "",
+            "negative": ", ".join(NEGATIVE_BASELINES[target_profile]),
+            "report": "Built an adaptive local prompt from connected source content",
+        }
+        trace = {}
+        result = _postprocess_result(
+            values,
+            target_profile,
+            fallback_source,
+            style_anchor,
+            style_cluster,
+            fallback_mode,
+            trace,
+        )
+        result = _with_processing_report(result, stage, fallback_mode, trace, error_message)
+    else:
+        values = {
+            "positive": _profile_positive_fallback(target_profile, fallback_source, style_anchor, style_cluster),
+            "negative": ", ".join(NEGATIVE_BASELINES[target_profile]),
+            "report": (
+                "Ollama returned invalid JSON, so a local fallback prompt was built from curated input terms. "
+                f"Parser detail: {error_message}"
+            ),
+        }
+        result = _postprocess_result(values, target_profile, fallback_source, style_anchor, style_cluster)
+    return _apply_spatial_result(result, target_profile, left, right, top, bottom, fallback_mode=fallback_mode)
 
 
 def _target_profile_instructions(target_profile, style_cluster):
@@ -3611,6 +4050,9 @@ def _target_profile_instructions(target_profile, style_cluster):
 - Begin background_prompt with nearby objects and the visible setting. Continue with architecture or terrain, light sources, color, atmosphere, and depth.
 - End background_prompt with the figure's emotional expression, body language, and the emotional effect of the whole scene.
 - Preserve source concepts while turning them into coherent visual prose. Do not echo candidate-list names or discarded words as a template.
+- When left, right, top, or bottom placements are supplied, integrate them into one continuous full-frame composition with one camera, perspective, scale, and lighting setup.
+- Describe the main figure exactly once. Merge repeated character details from multiple placements into that same figure instead of creating another portrait, crop, panel, or full-body copy.
+- Never turn spatial placements into a split screen, diptych, triptych, collage, comic panels, multiple views, or separate shots.
 - Do not write phrases like "built around", "final mood joins", "the scene should feel", or generic template language.
 - Write concrete visual prose, not a Danbooru tag list, keyword chain, instruction, or wish list.
 - Do not include field labels inside values.
@@ -3739,6 +4181,7 @@ def _build_generation_prompt(
     right="",
     top="",
     bottom="",
+    prompt_plan=None,
 ):
     target_profile = _normalize_target_profile(target_profile)
     anchor = str(style_anchor).strip()
@@ -3749,6 +4192,13 @@ def _build_generation_prompt(
     example_block = f"\n{example}\n" if example else ""
     spatial_context = _spatial_context(target_profile, left, right, top, bottom)
     spatial_block = f"\n{spatial_context}\n" if spatial_context else ""
+    plan_block = (
+        "\nStructured plan from the planning stage:\n"
+        + json.dumps(prompt_plan, ensure_ascii=False, indent=2)
+        + "\nUse the original source and fixed inputs to recover anything the plan omitted.\n"
+        if prompt_plan
+        else ""
+    )
     return f"""Rewrite this random word salad into one model-specific image prompt set.
 
 {_target_profile_instructions(target_profile, style_cluster)}
@@ -3760,6 +4210,7 @@ Random word salad (global guidance for the entire image):
 Style anchor / fixed requirements:
 {anchor_block}
 {spatial_block}
+{plan_block}
 
 Important:
 - Fill every JSON field with a useful non-empty string, except Z-Image negative which should be empty.
@@ -3768,6 +4219,7 @@ Important:
 - For Anima, keep the controlled base tag line first, then use 180 to 260 words of short natural sentences in subject-to-emotion order.
 - For Anima, do not use Pony v7/SDXL/Z-Image control language such as style_cluster_*, rating_explicit, or source_* tags.
 - For Anima, your foreground_prompt and background_prompt should be final usable prose, not placeholders for later rewriting.
+- For Anima, all spatial inputs must form one continuous image with one camera view; describe the main figure once and never create panels, split screens, or repeated views of the character.
 - For Anima, do not include labels, candidate-list headings, "built around", "final mood joins", or "the scene should feel" inside JSON values.
 - For Krea 2, keep the style anchor unchanged at the beginning of base_prompt. The combined positive must still begin with foreground_prompt and its main subject.
 - For Krea 2 and Z-Image, avoid meta openings and follow the shared subject-to-aesthetic content order.
@@ -3826,6 +4278,271 @@ Use exactly these keys: {", ".join(RESPONSE_KEYS)}
 {example_block}{candidate_block}{spatial_block}
 Source visual terms: {terms}
 Rules: base_prompt contains global model/style or natural style guidance; foreground_prompt describes the main subject; background_prompt describes the visible setting; negative lists quality/anatomy/artifact problems to avoid unless the target profile says it is unused; report is one short sentence."""
+
+
+def _build_planner_prompt(
+    target_profile,
+    word_salad,
+    style_anchor,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
+    spatial = _spatial_values(left, right, top, bottom)
+    return f"""Create a conservative structured plan for target profile {_normalize_target_profile(target_profile)}.
+
+Random word salad to curate:
+{str(word_salad).strip() or "(none)"}
+
+Fixed style anchor:
+{str(style_anchor).strip() or "(none)"}
+
+Fixed spatial inputs:
+{json.dumps(spatial, ensure_ascii=False, indent=2)}
+
+Rules:
+- The target profile is an output-format label, never an image subject or source concept.
+- Never place the target profile name in subject, subject_details, required_elements, or any other content field unless the user supplied it as content.
+- Classify useful source concepts without writing the final prompt.
+- Put every fixed style-anchor and non-empty spatial concept in required_elements or spatial_relations.
+- You may put weak or incoherent random vocabulary in discarded_terms.
+- Do not invent a new subject, setting, action, style, prop, or required element.
+- Use exactly these keys: {", ".join(PLAN_KEYS)}.
+- Return valid JSON only."""
+
+
+def _result_dict(result):
+    return {key: str(value) for key, value in zip(OUTPUT_KEYS, result)}
+
+
+def _build_review_prompt(
+    target_profile,
+    word_salad,
+    style_anchor,
+    prompt_plan,
+    result,
+    local_issues,
+    style_cluster,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
+    return f"""Review this compiled prompt without rewriting it.
+
+Target rules:
+{_target_profile_instructions(target_profile, style_cluster)}
+
+Original source:
+{str(word_salad).strip() or "(none)"}
+
+Fixed style anchor:
+{str(style_anchor).strip() or "(none)"}
+
+Fixed spatial inputs:
+{json.dumps(_spatial_values(left, right, top, bottom), ensure_ascii=False, indent=2)}
+
+Structured plan:
+{json.dumps(prompt_plan, ensure_ascii=False, indent=2)}
+
+Compiled result:
+{json.dumps(_result_dict(result), ensure_ascii=False, indent=2)}
+
+Local validation findings:
+{json.dumps(local_issues, ensure_ascii=False)}
+
+Set needs_revision when a required concept is missing, the result contradicts the source, an unsupported detail was added, a target-profile rule is broken, or local findings are non-empty.
+Return exactly these JSON keys: {", ".join(REVIEW_KEYS)}."""
+
+
+def _build_correction_prompt(
+    target_profile,
+    word_salad,
+    style_anchor,
+    prompt_plan,
+    result,
+    local_issues,
+    review,
+    style_cluster,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
+    return f"""Correct this compiled prompt exactly once.
+
+{_target_profile_instructions(target_profile, style_cluster)}
+
+Original source:
+{str(word_salad).strip() or "(none)"}
+
+Fixed style anchor:
+{str(style_anchor).strip() or "(none)"}
+
+Fixed spatial inputs:
+{json.dumps(_spatial_values(left, right, top, bottom), ensure_ascii=False, indent=2)}
+
+Structured plan:
+{json.dumps(prompt_plan, ensure_ascii=False, indent=2)}
+
+Current compiled result:
+{json.dumps(_result_dict(result), ensure_ascii=False, indent=2)}
+
+Local validation findings:
+{json.dumps(local_issues, ensure_ascii=False)}
+
+Reviewer findings:
+{json.dumps(review, ensure_ascii=False, indent=2)}
+
+Fix only the reported problems. Preserve valid content and do not introduce new motifs.
+Return exactly these JSON keys: {", ".join(RESPONSE_KEYS)}."""
+
+
+def _concept_tokens(value):
+    return [
+        token
+        for token in re.findall(r"[a-z0-9]+", str(value).casefold().replace("_", " "))
+        if len(token) > 1
+    ]
+
+
+def _concept_is_present(value, text):
+    tokens = _concept_tokens(value)
+    if not tokens:
+        return True
+    present = set(_concept_tokens(text))
+    return sum(token in present for token in set(tokens)) >= min(3, len(set(tokens)))
+
+
+def _validate_plan_source(plan, word_salad, style_anchor, left="", right="", top="", bottom=""):
+    source = " ".join(
+        value
+        for value in (
+            str(word_salad).strip(),
+            str(style_anchor).strip(),
+            *_spatial_values(left, right, top, bottom).values(),
+        )
+        if value
+    )
+    source_tokens = set(_concept_tokens(source))
+    ignored = {"a", "an", "the", "one", "main", "subject", "character", "figure", "scene", "image"}
+    subject_tokens = set(_concept_tokens(plan.get("subject", ""))) - ignored
+    if subject_tokens and not subject_tokens.intersection(source_tokens):
+        raise ValueError(f"planner subject is not grounded in the source: {plan['subject']}")
+    unsupported = []
+    for element in plan.get("required_elements", []):
+        tokens = set(_concept_tokens(element)) - ignored
+        if tokens and not tokens.intersection(source_tokens):
+            unsupported.append(element)
+    if unsupported:
+        raise ValueError("planner required elements are not grounded in the source: " + ", ".join(unsupported))
+    return plan
+
+
+def _required_pipeline_elements(prompt_plan, style_anchor):
+    required = list(prompt_plan.get("required_elements", []))
+    required.extend(_curated_terms(style_anchor, limit=32, filter_low_value=False))
+    result = []
+    for value in required:
+        clean = str(value).strip()
+        if clean and clean.casefold() not in {item.casefold() for item in result}:
+            result.append(clean)
+    return result
+
+
+def _local_pipeline_issues(
+    target_profile,
+    prompt_plan,
+    result,
+    style_anchor="",
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
+    profile = _normalize_target_profile(target_profile)
+    positive, negative, report, base_prompt, foreground_prompt, background_prompt = result
+    issues = []
+    for name, value in (
+        ("positive", positive),
+        ("report", report),
+        ("base_prompt", base_prompt),
+        ("foreground_prompt", foreground_prompt),
+        ("background_prompt", background_prompt),
+    ):
+        if not str(value).strip():
+            issues.append(f"empty {name}")
+    if profile == "z_image":
+        if str(negative).strip():
+            issues.append("Z-Image negative must be empty")
+    elif not str(negative).strip():
+        issues.append("negative prompt is empty")
+
+    for element in _required_pipeline_elements(prompt_plan, style_anchor):
+        if not _concept_is_present(element, positive):
+            issues.append(f"missing required element: {element}")
+    for element in prompt_plan.get("avoid", []):
+        if _concept_is_present(element, positive):
+            issues.append(f"avoided element appears in positive: {element}")
+    for region, detail in _spatial_values(left, right, top, bottom).items():
+        if detail and not _spatial_region_is_integrated(region, detail, positive):
+            issues.append(f"spatial input not integrated: {region}")
+
+    if profile in ("pony_v6", "illustrious"):
+        for name, value in (
+            ("base_prompt", base_prompt),
+            ("foreground_prompt", foreground_prompt),
+            ("background_prompt", background_prompt),
+        ):
+            if "," in str(value):
+                issues.append(f"{name} must be comma-free for {profile}")
+
+    limits = {
+        "anima": (ANIMA_POSITIVE_WORD_RANGE[1], ANIMA_FOREGROUND_WORD_RANGE[1], ANIMA_BACKGROUND_WORD_RANGE[1]),
+        "z_image": (Z_IMAGE_POSITIVE_WORD_RANGE[1], Z_IMAGE_FOREGROUND_WORD_RANGE[1], Z_IMAGE_BACKGROUND_WORD_RANGE[1]),
+        "krea2": (KREA2_POSITIVE_WORD_RANGE[1], KREA2_FOREGROUND_WORD_RANGE[1], KREA2_BACKGROUND_WORD_RANGE[1]),
+    }
+    if profile in limits:
+        positive_max, foreground_max, background_max = limits[profile]
+        for name, value, maximum in (
+            ("positive", positive, positive_max),
+            ("foreground_prompt", foreground_prompt, foreground_max),
+            ("background_prompt", background_prompt, background_max),
+        ):
+            if _word_count(value) > maximum:
+                issues.append(f"{name} exceeds {maximum} words")
+    return issues
+
+
+def _review_requests_revision(review):
+    return (
+        not review.get("all_required_preserved", False)
+        or review.get("needs_revision", False)
+        or any(review.get(key) for key in REVIEW_LIST_KEYS)
+    )
+
+
+def _append_pipeline_report(result, detail):
+    values = list(result)
+    report = str(values[2]).rstrip(" .")
+    values[2] = f"{report}. {str(detail).strip().rstrip('.')}." if report else f"{str(detail).strip().rstrip('.')}."
+    return tuple(values)
+
+
+def _validate_refiner_inputs(target_profile, word_salad, style_anchor, left, right, top, bottom):
+    has_primary_text = bool(str(word_salad).strip() or str(style_anchor).strip())
+    spatial_values = _spatial_values(left, right, top, bottom)
+    has_spatial_text = any(spatial_values.values())
+    if not has_primary_text and not has_spatial_text:
+        raise RuntimeError(
+            "Ollama Prompt Refiner: word_salad, style_anchor, or a spatial input must contain text"
+        )
+    if has_spatial_text and not has_primary_text and _normalize_target_profile(target_profile) not in SPATIAL_TARGET_PROFILES:
+        supported = ", ".join(sorted(SPATIAL_TARGET_PROFILES))
+        raise RuntimeError(
+            "Ollama Prompt Refiner: spatial-only input requires a natural prompt profile: " + supported
+        )
 
 
 class NukunOllamaPromptRefiner:
@@ -3968,14 +4685,190 @@ class NukunOllamaPromptRefiner:
                         "tooltip": "Optional creative guidance for the bottom area of natural-language prompts.",
                     },
                 ),
+                "fallback_mode": (
+                    FALLBACK_MODES,
+                    {
+                        "default": DEFAULT_FALLBACK_MODE,
+                        "tooltip": "Single mode applies this to natural profiles; pipeline modes use it for every stage and target profile.",
+                    },
+                ),
+                "pipeline_mode": (
+                    PIPELINE_MODES,
+                    {
+                        "default": DEFAULT_PIPELINE_MODE,
+                        "tooltip": "single keeps the classic refiner; plan_compile adds a planner; plan_compile_review also adds semantic review and at most one correction.",
+                    },
+                ),
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING")
-    RETURN_NAMES = OUTPUT_KEYS
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = (*OUTPUT_KEYS, "plan_json", "review_json")
     FUNCTION = "refine"
     CATEGORY = "Nukun/Text"
-    DESCRIPTION = "Uses a local Ollama model to turn source text into a selected image- or Wan 2.2 video-specific split prompt set."
+    DESCRIPTION = "Uses one local Ollama model in a single or optional plan/compiler/reviewer pipeline to build a selected image- or Wan 2.2 video-specific split prompt set."
+
+    def _refine_single(
+        self,
+        word_salad,
+        ollama_url,
+        ollama_model,
+        target_profile,
+        seed,
+        temperature,
+        top_p,
+        style_cluster,
+        timeout_seconds,
+        context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH,
+        style_anchor="",
+        left="",
+        right="",
+        top="",
+        bottom="",
+        fallback_mode=DEFAULT_FALLBACK_MODE,
+    ):
+        _validate_refiner_inputs(target_profile, word_salad, style_anchor, left, right, top, bottom)
+
+        profile = _normalize_target_profile(target_profile)
+        mode = _normalize_fallback_mode(fallback_mode)
+        continue_active = profile in NATURAL_FALLBACK_PROFILES and mode == "continue"
+        responses = []
+        errors = []
+
+        def process_response(response_text, stage):
+            values = _validate_result(_extract_json_object(response_text))
+            trace = {}
+            result = _postprocess_result(
+                values,
+                profile,
+                word_salad,
+                style_anchor,
+                style_cluster,
+                mode,
+                trace,
+            )
+            result = _apply_spatial_result(
+                result,
+                profile,
+                left,
+                right,
+                top,
+                bottom,
+                fallback_mode=mode,
+            )
+            return _with_processing_report(result, stage, mode, trace)
+
+        try:
+            raw_response = _request_ollama(
+                ollama_url,
+                ollama_model,
+                _build_generation_prompt(
+                    profile,
+                    word_salad,
+                    style_anchor,
+                    style_cluster,
+                    left,
+                    right,
+                    top,
+                    bottom,
+                ),
+                seed,
+                temperature,
+                top_p,
+                timeout_seconds,
+                context_length,
+            )
+            responses.append(("initial", raw_response))
+        except RuntimeError as error:
+            if continue_active:
+                return _continue_result(
+                    profile, word_salad, style_anchor, responses, error, left, right, top, bottom
+                )
+            raise
+
+        try:
+            return process_response(raw_response, "initial")
+        except ValueError as error:
+            errors.append(("initial", error))
+
+        try:
+            repair_response = _request_ollama(
+                ollama_url,
+                ollama_model,
+                _build_repair_prompt(raw_response, profile, left, right, top, bottom),
+                int(seed) + 1,
+                0.0,
+                1.0,
+                timeout_seconds,
+                context_length,
+            )
+            responses.append(("repair", repair_response))
+        except RuntimeError as error:
+            if continue_active:
+                return _continue_result(
+                    profile, word_salad, style_anchor, responses, error, left, right, top, bottom
+                )
+            raise
+
+        try:
+            return process_response(repair_response, "repair")
+        except ValueError as error:
+            errors.append(("repair", error))
+
+        try:
+            minimal_response = _request_ollama(
+                ollama_url,
+                ollama_model,
+                _build_minimal_retry_prompt(
+                    profile,
+                    word_salad,
+                    style_anchor,
+                    style_cluster,
+                    left,
+                    right,
+                    top,
+                    bottom,
+                ),
+                int(seed) + 2,
+                0.0,
+                1.0,
+                timeout_seconds,
+                context_length,
+            )
+            responses.append(("minimal", minimal_response))
+        except RuntimeError as error:
+            if continue_active:
+                return _continue_result(
+                    profile, word_salad, style_anchor, responses, error, left, right, top, bottom
+                )
+            raise
+
+        try:
+            return process_response(minimal_response, "minimal")
+        except ValueError as error:
+            errors.append(("minimal", error))
+
+        error_detail = "; ".join(f"{stage}={error}" for stage, error in errors)
+        if continue_active:
+            return _continue_result(
+                profile, word_salad, style_anchor, responses, error_detail, left, right, top, bottom
+            )
+        if profile in NATURAL_FALLBACK_PROFILES and mode == "strict":
+            raise RuntimeError(
+                "Ollama Prompt Refiner: strict mode rejected all three responses; " + error_detail
+            )
+        return _local_fallback_result(
+            profile,
+            word_salad,
+            style_anchor,
+            style_cluster,
+            error_detail,
+            left,
+            right,
+            top,
+            bottom,
+            fallback_mode=mode,
+        )
 
     def refine(
         self,
@@ -3994,72 +4887,180 @@ class NukunOllamaPromptRefiner:
         right="",
         top="",
         bottom="",
+        fallback_mode=DEFAULT_FALLBACK_MODE,
+        pipeline_mode=DEFAULT_PIPELINE_MODE,
     ):
-        has_primary_text = bool(str(word_salad).strip() or str(style_anchor).strip())
-        spatial_values = _spatial_values(left, right, top, bottom)
-        has_spatial_text = any(spatial_values.values())
-        if not has_primary_text and not has_spatial_text:
-            raise RuntimeError(
-                "Ollama Prompt Refiner: word_salad, style_anchor, or a spatial input must contain text"
-            )
-        if (
-            has_spatial_text
-            and not has_primary_text
-            and _normalize_target_profile(target_profile) not in SPATIAL_TARGET_PROFILES
-        ):
-            supported = ", ".join(sorted(SPATIAL_TARGET_PROFILES))
-            raise RuntimeError(
-                "Ollama Prompt Refiner: spatial-only input requires a natural prompt profile: "
-                f"{supported}"
-            )
-
-        raw_response = _request_ollama(
-            ollama_url,
-            ollama_model,
-            _build_generation_prompt(
-                target_profile,
+        _validate_refiner_inputs(target_profile, word_salad, style_anchor, left, right, top, bottom)
+        pipeline = _normalize_pipeline_mode(pipeline_mode)
+        if pipeline == "single":
+            result = self._refine_single(
                 word_salad,
-                style_anchor,
+                ollama_url,
+                ollama_model,
+                target_profile,
+                seed,
+                temperature,
+                top_p,
                 style_cluster,
+                timeout_seconds,
+                context_length,
+                style_anchor,
                 left,
                 right,
                 top,
                 bottom,
-            ),
-            seed,
-            temperature,
-            top_p,
-            timeout_seconds,
-            context_length,
-        )
+                fallback_mode,
+            )
+            return (*result, "{}", "{}")
 
-        try:
-            values = _validate_result(_extract_json_object(raw_response))
-            result = _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
-            return _apply_spatial_result(result, target_profile, left, right, top, bottom)
-        except ValueError as first_error:
-            repair_response = _request_ollama(
+        profile = _normalize_target_profile(target_profile)
+        fallback = _normalize_fallback_mode(fallback_mode)
+        plan = {}
+        review = {}
+        review_error = ""
+        correction_applied = False
+        stages = []
+
+        def json_text(value):
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+        def strict_error(stage, error):
+            raise RuntimeError(f"Ollama Prompt Refiner: {stage} stage failed: {error}") from error
+
+        def adaptive_result(stage, error):
+            single_result = self._refine_single(
+                word_salad,
                 ollama_url,
                 ollama_model,
-                _build_repair_prompt(raw_response, target_profile, left, right, top, bottom),
+                profile,
+                seed,
+                temperature,
+                top_p,
+                style_cluster,
+                timeout_seconds,
+                context_length,
+                style_anchor,
+                left,
+                right,
+                top,
+                bottom,
+                fallback,
+            )
+            single_result = _append_pipeline_report(
+                single_result,
+                f"pipeline_mode={pipeline}; adaptive fallback to single after {stage} failure: {error}",
+            )
+            review_output = {"stage_error": f"{stage}: {error}"} if review else {}
+            return (*single_result, json_text(plan) if plan else "{}", json_text(review_output) if review_output else "{}")
+
+        try:
+            planner_response = _request_ollama(
+                ollama_url,
+                ollama_model,
+                _build_planner_prompt(profile, word_salad, style_anchor, left, right, top, bottom),
+                seed,
+                0.2,
+                top_p,
+                timeout_seconds,
+                context_length,
+                output_schema=PLAN_SCHEMA,
+                system_instructions=PLANNER_SYSTEM_INSTRUCTIONS,
+                num_predict=700,
+            )
+            plan = _validate_prompt_plan(_extract_json_object(planner_response))
+            plan = _enforce_fixed_plan_inputs(plan, style_anchor, left, right, top, bottom)
+            plan = _validate_plan_source(plan, word_salad, style_anchor, left, right, top, bottom)
+            stages.append("planner")
+        except (RuntimeError, ValueError) as error:
+            plan = {}
+            if fallback == "strict":
+                strict_error("planner", error)
+            if fallback == "adaptive":
+                return adaptive_result("planner", error)
+            stages.append("planner_skipped")
+
+        compiler_result = None
+        try:
+            compiler_response = _request_ollama(
+                ollama_url,
+                ollama_model,
+                _build_generation_prompt(
+                    profile,
+                    word_salad,
+                    style_anchor,
+                    style_cluster,
+                    left,
+                    right,
+                    top,
+                    bottom,
+                    prompt_plan=plan,
+                ),
                 int(seed) + 1,
-                0.0,
-                1.0,
+                temperature,
+                top_p,
                 timeout_seconds,
                 context_length,
             )
+            values = _validate_result(_extract_json_object(compiler_response))
+            trace = {}
+            compiler_result = _postprocess_result(
+                values,
+                profile,
+                word_salad,
+                style_anchor,
+                style_cluster,
+                fallback,
+                trace,
+            )
+            compiler_result = _apply_spatial_result(
+                compiler_result,
+                profile,
+                left,
+                right,
+                top,
+                bottom,
+                fallback_mode=fallback,
+            )
+            compiler_result = _with_processing_report(
+                compiler_result, "compiler", fallback, trace
+            )
+            stages.append("compiler")
+        except (RuntimeError, ValueError) as error:
+            if fallback == "strict":
+                strict_error("compiler", error)
+            if fallback == "adaptive":
+                return adaptive_result("compiler", error)
+            compiler_result = _local_fallback_result(
+                profile,
+                word_salad,
+                style_anchor,
+                style_cluster,
+                f"compiler={error}",
+                left,
+                right,
+                top,
+                bottom,
+                fallback_mode="continue",
+                stage="compiler_continue",
+            )
+            stages.append("compiler_local_continue")
+
+        local_issues = _local_pipeline_issues(
+            profile, plan, compiler_result, style_anchor, left, right, top, bottom
+        )
+
+        if pipeline == "plan_compile_review":
             try:
-                values = _validate_result(_extract_json_object(repair_response))
-                result = _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
-                return _apply_spatial_result(result, target_profile, left, right, top, bottom)
-            except ValueError as second_error:
-                minimal_response = _request_ollama(
+                reviewer_response = _request_ollama(
                     ollama_url,
                     ollama_model,
-                    _build_minimal_retry_prompt(
-                        target_profile,
+                    _build_review_prompt(
+                        profile,
                         word_salad,
                         style_anchor,
+                        plan,
+                        compiler_result,
+                        local_issues,
                         style_cluster,
                         left,
                         right,
@@ -4067,27 +5068,109 @@ class NukunOllamaPromptRefiner:
                         bottom,
                     ),
                     int(seed) + 2,
-                    0.0,
+                    0.1,
                     1.0,
                     timeout_seconds,
                     context_length,
+                    output_schema=REVIEW_SCHEMA,
+                    system_instructions=REVIEWER_SYSTEM_INSTRUCTIONS,
+                    num_predict=500,
                 )
-                try:
-                    values = _validate_result(_extract_json_object(minimal_response))
-                    result = _postprocess_result(values, target_profile, word_salad, style_anchor, style_cluster)
-                    return _apply_spatial_result(result, target_profile, left, right, top, bottom)
-                except ValueError as third_error:
-                    return _local_fallback_result(
-                        target_profile,
+                review = _validate_review(_extract_json_object(reviewer_response))
+                stages.append("reviewer")
+            except (RuntimeError, ValueError) as error:
+                if fallback == "strict":
+                    strict_error("reviewer", error)
+                if fallback == "adaptive":
+                    return adaptive_result("reviewer", error)
+                review_error = str(error)
+                stages.append("reviewer_skipped")
+
+        needs_correction = bool(local_issues) or bool(review and _review_requests_revision(review))
+        if needs_correction:
+            try:
+                correction_response = _request_ollama(
+                    ollama_url,
+                    ollama_model,
+                    _build_correction_prompt(
+                        profile,
                         word_salad,
                         style_anchor,
+                        plan,
+                        compiler_result,
+                        local_issues,
+                        review,
                         style_cluster,
-                        f"initial={first_error}; repair={second_error}; minimal={third_error}",
                         left,
                         right,
                         top,
                         bottom,
-                    )
+                    ),
+                    int(seed) + 3,
+                    0.2,
+                    1.0,
+                    timeout_seconds,
+                    context_length,
+                )
+                corrected_values = _validate_result(_extract_json_object(correction_response))
+                trace = {}
+                corrected_result = _postprocess_result(
+                    corrected_values,
+                    profile,
+                    word_salad,
+                    style_anchor,
+                    style_cluster,
+                    fallback,
+                    trace,
+                )
+                compiler_result = _apply_spatial_result(
+                    corrected_result,
+                    profile,
+                    left,
+                    right,
+                    top,
+                    bottom,
+                    fallback_mode=fallback,
+                )
+                correction_applied = True
+                stages.append("correction")
+            except (RuntimeError, ValueError) as error:
+                if fallback == "strict":
+                    strict_error("correction", error)
+                if fallback == "adaptive":
+                    return adaptive_result("correction", error)
+                review_error = "; ".join(value for value in (review_error, f"correction: {error}") if value)
+                stages.append("correction_kept_compiler")
+
+        final_issues = _local_pipeline_issues(
+            profile, plan, compiler_result, style_anchor, left, right, top, bottom
+        )
+        if final_issues and fallback == "strict":
+            strict_error("final_validation", ValueError("; ".join(final_issues)))
+        if final_issues and fallback == "adaptive":
+            return adaptive_result("final_validation", ValueError("; ".join(final_issues)))
+
+        detail = (
+            f"pipeline_mode={pipeline}; stages={','.join(stages)}; "
+            f"correction_applied={str(correction_applied).lower()}; "
+            f"final_local_issues={len(final_issues)}"
+        )
+        if review_error:
+            detail += f"; continued_after={review_error}"
+        compiler_result = _append_pipeline_report(compiler_result, detail)
+
+        review_output = {}
+        if pipeline == "plan_compile_review":
+            review_output = dict(review)
+            if review_error:
+                review_output["stage_error"] = review_error
+            review_output["correction_applied"] = correction_applied
+            review_output["final_local_issues"] = final_issues
+        return (
+            *compiler_result,
+            json_text(plan) if plan else "{}",
+            json_text(review_output) if review_output else "{}",
+        )
 
     @classmethod
     def IS_CHANGED(
@@ -4107,7 +5190,10 @@ class NukunOllamaPromptRefiner:
         right="",
         top="",
         bottom="",
+        fallback_mode=DEFAULT_FALLBACK_MODE,
+        pipeline_mode=DEFAULT_PIPELINE_MODE,
     ):
+        pipeline = _normalize_pipeline_mode(pipeline_mode)
         digest = hashlib.sha256()
         for value in (
             word_salad,
@@ -4125,6 +5211,10 @@ class NukunOllamaPromptRefiner:
             right,
             top,
             bottom,
+            _normalize_fallback_mode(fallback_mode)
+            if pipeline != "single" or _normalize_target_profile(target_profile) in NATURAL_FALLBACK_PROFILES
+            else "ignored",
+            pipeline,
         ):
             digest.update(str(value).encode("utf-8"))
             digest.update(b"\0")

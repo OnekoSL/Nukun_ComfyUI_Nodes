@@ -46,7 +46,7 @@ class SpatialPromptInputTests(unittest.TestCase):
             self.assertTrue(options["dynamicPrompts"])
             self.assertTrue(options["defaultInput"])
         self.assertEqual(
-            refiner.NukunOllamaPromptRefiner.RETURN_NAMES,
+            refiner.NukunOllamaPromptRefiner.RETURN_NAMES[:6],
             ("positive", "negative", "report", "base_prompt", "foreground_prompt", "background_prompt"),
         )
 
@@ -60,12 +60,17 @@ class SpatialPromptInputTests(unittest.TestCase):
                     430,
                     **SPATIAL_VALUES,
                 )
-                for label, value in (
-                    ("Left side", SPATIAL_VALUES["left"]),
-                    ("Right side", SPATIAL_VALUES["right"]),
-                    ("Top area", SPATIAL_VALUES["top"]),
-                    ("Bottom area", SPATIAL_VALUES["bottom"]),
-                ):
+                labels = (
+                    (
+                        "Left placement in the shared frame",
+                        "Right placement in the shared frame",
+                        "Upper placement in the shared frame",
+                        "Lower placement in the shared frame",
+                    )
+                    if profile == "anima"
+                    else ("Left side", "Right side", "Top area", "Bottom area")
+                )
+                for label, value in zip(labels, SPATIAL_VALUES.values()):
                     self.assertIn(f"{label}: {value}", prompt)
                 self.assertIn("creative composition guidance rather than rigid geometry", prompt)
                 self.assertIn("global guidance for the entire image", prompt)
@@ -74,6 +79,87 @@ class SpatialPromptInputTests(unittest.TestCase):
         prompt = refiner._build_generation_prompt("pony_v7", "forest", "", 430, **SPATIAL_VALUES)
         self.assertIn("only in the natural caption sections", prompt)
         self.assertIn("not as control or Danbooru tags", prompt)
+
+    def test_anima_spatial_context_requires_one_coherent_camera_view(self):
+        context = refiner._spatial_context("anima", **SPATIAL_VALUES)
+        for phrase in (
+            "one continuous full-frame image",
+            "one camera view",
+            "Describe the main figure exactly once",
+            "Never turn the placements into panels",
+            "separate close-up and full-body views",
+            "one identity, outfit, body scale, pose, and silhouette",
+        ):
+            self.assertIn(phrase, context)
+
+    def test_anima_generation_repair_and_retry_keep_coherence_rules(self):
+        prompts = (
+            refiner._build_generation_prompt("anima", "forest", "", 430, **SPATIAL_VALUES),
+            refiner._build_repair_prompt("not json", "anima", **SPATIAL_VALUES),
+            refiner._build_minimal_retry_prompt("anima", "forest", "", 430, **SPATIAL_VALUES),
+        )
+        for prompt in prompts:
+            self.assertIn("one continuous full-frame image", prompt)
+            self.assertIn("Describe the main figure exactly once", prompt)
+
+    def test_anima_safety_sentence_reinforces_one_continuous_composition(self):
+        text = refiner._spatial_fallback_text(
+            "anima",
+            right="one dark-haired cat woman holding a lantern",
+            bottom="mushrooms and fallen logs",
+        )
+        self.assertEqual(
+            text,
+            "Within the same continuous composition on the right, one dark-haired cat woman holding a lantern. "
+            "Within the same continuous composition along the lower area, mushrooms and fallen logs.",
+        )
+
+    def test_anima_existing_subject_gets_positioned_without_repeating_details(self):
+        text = refiner._spatial_fallback_text(
+            "anima",
+            right="one dark-haired cat woman holding a glowing lantern",
+            existing_text=(
+                "One dark-haired cat woman holds a glowing lantern beside her black lace dress. "
+                "A shadowy forest surrounds her."
+            ),
+        )
+        self.assertEqual(
+            text,
+            "The same main figure occupies the right side of the single continuous composition.",
+        )
+        self.assertNotIn("dark-haired", text)
+        self.assertNotIn("lantern", text)
+
+    def test_anima_spatial_result_adds_multi_view_negatives(self):
+        result = refiner._apply_spatial_result(
+            self.spatial_result(),
+            "anima",
+            right="one dark-haired cat woman holding a lantern",
+        )
+        for term in refiner.ANIMA_SPATIAL_NEGATIVE_TERMS:
+            self.assertIn(term, result[1])
+
+    def test_anima_local_fallback_prioritizes_regional_subject(self):
+        result = refiner._local_fallback_result(
+            "anima",
+            "logo mark style dynamic composition strong composition delicate details year 2000 score_8",
+            "anime illustration",
+            430,
+            "invalid json",
+            right="anthro cat woman with long dark hair black lace dress holding a glowing lantern",
+            bottom="shadowy forest mushrooms fallen logs",
+        )
+        foreground = result[4].lower()
+        self.assertIn("anthro", foreground)
+        self.assertIn("cat", foreground)
+        self.assertIn("woman", foreground)
+        self.assertLess(foreground.index("anthro"), foreground.find("logo") if "logo" in foreground else len(foreground))
+        self.assertTrue(
+            result[5].startswith(
+                "The same main figure occupies the right side of the single continuous composition."
+            )
+        )
+        self.assertEqual(result[0].lower().count("anthro"), 1)
 
     def test_tag_profiles_ignore_spatial_data(self):
         for profile in ("pony_v6", "illustrious"):
