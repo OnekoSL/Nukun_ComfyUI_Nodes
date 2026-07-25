@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Prevented Anima and Krea2 compiler prompts from leaking static example subjects, replaced a failed planner with a source-grounded local plan in `continue` mode, exposed the planner error in `plan_json`, normalized contradictory reviewer flags, and locally rebuilt results whose planned subject is still missing after correction.
 - Made both Ollama nodes default to a 4096-token context and automatically unload their selected model after the complete node run, with an optional `unload_after_run` switch for prompt-only workflows that prefer a warm model.
 - Added optional `plan_compile` and `plan_compile_review` Ollama Prompt Refiner pipelines with structured planning, local validation, semantic review, one bounded correction, appended plan/review JSON outputs, and stage-aware fallback behavior for every target profile.
 - Added `resources/visual_art_styles.csv` with 250 original, model-neutral style phrases across ten visual-art categories, inspired in breadth by [ComfyUI-NO8D-controls](https://github.com/no8d/ComfyUI-NO8D-controls) without copying its long prompt descriptions or named styles.

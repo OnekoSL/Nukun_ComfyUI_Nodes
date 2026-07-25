@@ -900,6 +900,62 @@ def _enforce_fixed_plan_inputs(plan, style_anchor, left="", right="", top="", bo
     return plan
 
 
+def _build_local_prompt_plan(
+    target_profile,
+    word_salad,
+    style_anchor,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
+    spatial = _spatial_values(left, right, top, bottom)
+    subject_source = str(word_salad).strip() or " ".join(
+        value for value in spatial.values() if value
+    )
+    source_terms = _curated_terms(subject_source, limit=24, filter_low_value=False)
+    subject_terms = source_terms[:2]
+    subject = " ".join(subject_terms)
+    candidate_data = _candidate_data(target_profile, word_salad, style_anchor)
+    background_terms = candidate_data.get("background_candidates", [])[:6]
+    style_terms = candidate_data.get("style_candidates", [])[:6]
+    plan = {
+        "subject": subject,
+        "action": "",
+        "environment": " ".join(background_terms),
+        "style": str(style_anchor).strip() or " ".join(style_terms),
+        "composition": "",
+        "lighting": "",
+        "camera": "",
+        "subject_details": source_terms[2:14],
+        "spatial_relations": [],
+        "required_elements": [subject] if subject else [],
+        "avoid": [],
+        "discarded_terms": _candidate_discarded_noise(
+            word_salad,
+            style_anchor,
+            limit=18,
+        ),
+    }
+    plan = _enforce_fixed_plan_inputs(
+        plan,
+        style_anchor,
+        left,
+        right,
+        top,
+        bottom,
+    )
+    return _validate_plan_source(
+        plan,
+        word_salad,
+        style_anchor,
+        left,
+        right,
+        top,
+        bottom,
+    )
+
+
 def _validate_review(data):
     if not isinstance(data, dict):
         raise ValueError("reviewer JSON root is not an object")
@@ -920,6 +976,19 @@ def _validate_review(data):
         raise ValueError("summary must be a string")
     review["summary"] = data["summary"].strip()
     return review
+
+
+def _normalize_review_consistency(review, local_issues=()):
+    normalized = {
+        key: (list(value) if isinstance(value, list) else value)
+        for key, value in review.items()
+    }
+    if normalized["missing_elements"]:
+        normalized["all_required_preserved"] = False
+    has_findings = any(normalized[key] for key in REVIEW_LIST_KEYS)
+    if local_issues or has_findings or not normalized["all_required_preserved"]:
+        normalized["needs_revision"] = True
+    return normalized
 
 
 def _normalize_style_cluster(style_cluster):
@@ -4153,6 +4222,8 @@ def _target_profile_instructions(target_profile, style_cluster):
 
 def _candidate_few_shot_example(target_profile, word_salad, style_anchor):
     target_profile = _normalize_target_profile(target_profile)
+    if target_profile not in ("pony_v6", "illustrious"):
+        return ""
     data = _candidate_data(target_profile, word_salad, style_anchor)
     if not data:
         return ""
@@ -4182,37 +4253,6 @@ foreground_prompt => {foreground_prompt}
 background_prompt => {background_prompt}
 negative => low quality worst quality bad anatomy bad hands malformed fingers poorly drawn face text watermark logo blurry
 report => Built an Illustrious split prompt from sorted visual candidates."""
-    if target_profile == "anima":
-        base = _anima_tag_text(
-            [*fixed_base[:8], *style[:2], "anime illustration", "digital art"],
-            limit=12,
-            fallback="masterpiece, best quality, score_9, score_8_up, score_7_up, anime illustration",
-        )
-        foreground_prompt = (
-            "A copper-haired archivist stands beside a rain-streaked window and studies a small blue crystal. "
-            "Her coat has worn leather seams, silver buttons, and damp fabric edges. "
-            "She holds the crystal close to her chest while her careful smile shows quiet curiosity."
-        )
-        background_prompt = (
-            "A narrow workshop surrounds her with brass tools, glass jars, and stacked field notes. "
-            "Warm lamplight crosses the wooden table and fades into the rainy city outside. "
-            "The calm light makes her focused expression feel private and memorable."
-        )
-        return f"""Example field values for Anima using the current candidates only:
-base_prompt => {base}
-foreground_prompt => {foreground_prompt}
-background_prompt => {background_prompt}
-negative => worst quality, low quality, score_1, score_2, score_3, artist name, bad anatomy, bad hands, text, watermark, blurry
-report => Built a natural Anima prompt from sorted visual candidates."""
-    if target_profile == "krea2":
-        anchor = str(style_anchor).strip()
-        anchor_prefix = f"{anchor}, " if anchor else ""
-        return f"""Example field values for Krea 2 (positive is joined subject-first):
-base_prompt => {anchor_prefix}A cinematic medium shot uses warm window light, muted blue and copper colors, shallow focal depth, and realistic glass and metal reflections.
-foreground_prompt => One copper-haired archivist opens a worn leather book beside a compact brass machine. She holds a palm-sized blue crystal above the page, where its cool glow reflects across her fingers, silver buttons, damp coat seams, and three clear glass bottles.
-background_prompt => A narrow wooden workshop surrounds her. Tall rain-streaked windows stand behind the table, with blurred city rooftops beyond them. A copper lamp to her left creates warm contact shadows beneath the tools and books.
-negative => worst quality, low quality, blurry, bad anatomy, bad hands, extra fingers, duplicate subject, distorted geometry, unreadable text, watermark, logo
-report => Built a natural Krea 2 description with explicit materials, lighting, quantities, and spatial relationships."""
     return ""
 
 
@@ -4397,6 +4437,8 @@ Local validation findings:
 {json.dumps(local_issues, ensure_ascii=False)}
 
 Set needs_revision when a required concept is missing, the result contradicts the source, an unsupported detail was added, a target-profile rule is broken, or local findings are non-empty.
+Judge only the compiled result. Do not copy target-rule examples or required negative-prompt terms into profile_violations.
+When any finding list is non-empty, set needs_revision to true. When missing_elements is non-empty, set all_required_preserved to false.
 Return exactly these JSON keys: {", ".join(REVIEW_KEYS)}."""
 
 
@@ -4529,6 +4571,9 @@ def _local_pipeline_issues(
     for element in prompt_plan.get("avoid", []):
         if _concept_is_present(element, positive):
             issues.append(f"avoided element appears in positive: {element}")
+    planned_subject = str(prompt_plan.get("subject", "")).strip()
+    if planned_subject and not _concept_is_present(planned_subject, foreground_prompt):
+        issues.append(f"planned subject missing from foreground_prompt: {planned_subject}")
     for region, detail in _spatial_values(left, right, top, bottom).items():
         if detail and not _spatial_region_is_integrated(region, detail, positive):
             issues.append(f"spatial input not integrated: {region}")
@@ -4967,6 +5012,7 @@ class NukunOllamaPromptRefiner:
         profile = _normalize_target_profile(target_profile)
         fallback = _normalize_fallback_mode(fallback_mode)
         plan = {}
+        planner_status = {}
         review = {}
         review_error = ""
         correction_applied = False
@@ -4974,6 +5020,12 @@ class NukunOllamaPromptRefiner:
 
         def json_text(value):
             return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+        def plan_output():
+            output = dict(plan)
+            if planner_status:
+                output["planner_status"] = dict(planner_status)
+            return json_text(output) if output else "{}"
 
         def strict_error(stage, error):
             raise RuntimeError(f"Ollama Prompt Refiner: {stage} stage failed: {error}") from error
@@ -5002,7 +5054,7 @@ class NukunOllamaPromptRefiner:
                 f"pipeline_mode={pipeline}; adaptive fallback to single after {stage} failure: {error}",
             )
             review_output = {"stage_error": f"{stage}: {error}"} if review else {}
-            return (*single_result, json_text(plan) if plan else "{}", json_text(review_output) if review_output else "{}")
+            return (*single_result, plan_output(), json_text(review_output) if review_output else "{}")
 
         try:
             planner_response = _request_ollama(
@@ -5024,11 +5076,25 @@ class NukunOllamaPromptRefiner:
             stages.append("planner")
         except (RuntimeError, ValueError) as error:
             plan = {}
+            planner_status = {
+                "status": "failed",
+                "stage_error": str(error),
+            }
             if fallback == "strict":
                 strict_error("planner", error)
             if fallback == "adaptive":
                 return adaptive_result("planner", error)
-            stages.append("planner_skipped")
+            plan = _build_local_prompt_plan(
+                profile,
+                word_salad,
+                style_anchor,
+                left,
+                right,
+                top,
+                bottom,
+            )
+            planner_status["status"] = "local_fallback"
+            stages.append("planner_local_fallback")
 
         compiler_result = None
         try:
@@ -5127,7 +5193,10 @@ class NukunOllamaPromptRefiner:
                     system_instructions=REVIEWER_SYSTEM_INSTRUCTIONS,
                     num_predict=500,
                 )
-                review = _validate_review(_extract_json_object(reviewer_response))
+                review = _normalize_review_consistency(
+                    _validate_review(_extract_json_object(reviewer_response)),
+                    local_issues,
+                )
                 stages.append("reviewer")
             except (RuntimeError, ValueError) as error:
                 if fallback == "strict":
@@ -5200,6 +5269,41 @@ class NukunOllamaPromptRefiner:
             strict_error("final_validation", ValueError("; ".join(final_issues)))
         if final_issues and fallback == "adaptive":
             return adaptive_result("final_validation", ValueError("; ".join(final_issues)))
+        if final_issues and fallback == "continue":
+            continued_issues = list(final_issues)
+            compiler_result = _local_fallback_result(
+                profile,
+                word_salad,
+                style_anchor,
+                style_cluster,
+                "pipeline final validation: " + "; ".join(continued_issues),
+                left,
+                right,
+                top,
+                bottom,
+                fallback_mode="adaptive",
+                stage="pipeline_final_continue",
+            )
+            stages.append("final_local_fallback")
+            final_issues = _local_pipeline_issues(
+                profile,
+                plan,
+                compiler_result,
+                style_anchor,
+                left,
+                right,
+                top,
+                bottom,
+            )
+            if final_issues:
+                review_error = "; ".join(
+                    value
+                    for value in (
+                        review_error,
+                        "final local fallback: " + "; ".join(final_issues),
+                    )
+                    if value
+                )
 
         detail = (
             f"pipeline_mode={pipeline}; stages={','.join(stages)}; "
@@ -5219,7 +5323,7 @@ class NukunOllamaPromptRefiner:
             review_output["final_local_issues"] = final_issues
         return (
             *compiler_result,
-            json_text(plan) if plan else "{}",
+            plan_output(),
             json_text(review_output) if review_output else "{}",
         )
 

@@ -125,6 +125,35 @@ class PipelineSchemaTests(unittest.TestCase):
         self.assertIn("missing required element: watercolor", issues)
         self.assertIn("avoided element appears in positive: city", issues)
 
+    def test_local_validation_requires_planned_subject_in_foreground(self):
+        plan = refiner._validate_prompt_plan(plan_data())
+        result = (
+            "a copper-haired archivist studies a crystal while a red dragon appears in the distance",
+            "bad anatomy",
+            "ok",
+            "illustration",
+            "a copper-haired archivist studies a crystal",
+            "a red dragon flies above a mountain valley",
+        )
+        issues = refiner._local_pipeline_issues("anima", plan, result)
+        self.assertIn(
+            "planned subject missing from foreground_prompt: a red dragon",
+            issues,
+        )
+
+    def test_review_findings_force_consistent_revision_flags(self):
+        review = review_data()
+        review["profile_violations"] = ["foreign main subject"]
+        normalized = refiner._normalize_review_consistency(review)
+        self.assertTrue(normalized["all_required_preserved"])
+        self.assertTrue(normalized["needs_revision"])
+
+        review = review_data()
+        review["missing_elements"] = ["red dragon"]
+        normalized = refiner._normalize_review_consistency(review)
+        self.assertFalse(normalized["all_required_preserved"])
+        self.assertTrue(normalized["needs_revision"])
+
 
 class PipelineExecutionTests(unittest.TestCase):
     clean_result = (
@@ -220,8 +249,48 @@ class PipelineExecutionTests(unittest.TestCase):
             side_effect=[ValueError("bad plan"), json.dumps(compiler_data())],
         ), mock.patch.object(refiner, "_postprocess_result", return_value=self.clean_result):
             continued = node.refine(**refine_kwargs(fallback_mode="continue"))
-        self.assertEqual(continued[6], "{}")
-        self.assertIn("planner_skipped", continued[2])
+        continued_plan = json.loads(continued[6])
+        self.assertEqual(continued_plan["planner_status"]["status"], "local_fallback")
+        self.assertEqual(continued_plan["planner_status"]["stage_error"], "bad plan")
+        self.assertIn("red dragon", continued_plan["subject"])
+        self.assertIn("planner_local_fallback", continued[2])
+
+    def test_continue_mode_replaces_repeated_foreign_subject_with_local_fallback(self):
+        node = refiner.NukunOllamaPromptRefiner()
+        leaked = {
+            "base_prompt": "anime illustration with soft rain and warm light",
+            "foreground_prompt": (
+                "A copper-haired archivist studies a blue crystal beside a brass machine."
+            ),
+            "background_prompt": (
+                "A narrow wooden workshop surrounds her with rain-streaked windows."
+            ),
+            "negative": "bad anatomy",
+            "report": "Built an Anima prompt.",
+        }
+        kwargs = refine_kwargs(
+            profile="anima",
+            pipeline_mode="plan_compile",
+            fallback_mode="continue",
+        )
+        kwargs["word_salad"] = "maid latex tentacles forest fearful wet eyes"
+        kwargs["style_anchor"] = "anime style"
+        with mock.patch.object(
+            refiner,
+            "_request_ollama",
+            side_effect=[
+                ValueError("planner rejected"),
+                json.dumps(leaked),
+                json.dumps(leaked),
+            ],
+        ):
+            result = node.refine(**kwargs)
+        self.assertNotIn("copper-haired archivist", result[0].lower())
+        self.assertNotIn("blue crystal", result[0].lower())
+        self.assertIn("maid", result[0].lower())
+        self.assertIn("final_local_fallback", result[2])
+        plan = json.loads(result[6])
+        self.assertEqual(plan["planner_status"]["status"], "local_fallback")
 
     def test_compiler_reviewer_and_correction_failures_are_bounded(self):
         node = refiner.NukunOllamaPromptRefiner()
@@ -250,7 +319,7 @@ class PipelineExecutionTests(unittest.TestCase):
             side_effect=[json.dumps(required_plan), json.dumps(compiler_data()), ValueError("bad correction")],
         ), mock.patch.object(refiner, "_postprocess_result", return_value=self.clean_result) as postprocess:
             correction_continue = node.refine(**refine_kwargs(fallback_mode="continue"))
-        self.assertEqual(postprocess.call_count, 1)
+        self.assertEqual(postprocess.call_count, 2)
         self.assertIn("correction_kept_compiler", correction_continue[2])
 
     def test_pipeline_and_fallback_mode_participate_in_cache_hash(self):

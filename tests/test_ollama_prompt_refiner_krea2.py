@@ -60,7 +60,24 @@ class Krea2PromptProfileTests(unittest.TestCase):
             "krea2", "archivist crystal workshop rain", "watercolor style"
         )
         self.assertIn("For Krea 2", candidate_context)
-        self.assertIn("Example field values for Krea 2", example)
+        self.assertEqual(example, "")
+
+    def test_natural_profile_prompts_do_not_embed_unrelated_example_motifs(self):
+        for profile in ("anima", "krea2"):
+            with self.subTest(profile=profile):
+                prompt = refiner._build_generation_prompt(
+                    profile,
+                    "red fox mossy forest",
+                    "watercolor style",
+                    430,
+                ).lower()
+                for leaked_term in (
+                    "copper-haired archivist",
+                    "blue crystal",
+                    "narrow wooden workshop",
+                    "rain-streaked window",
+                ):
+                    self.assertNotIn(leaked_term, prompt)
 
     def test_anchor_is_preserved_while_positive_is_subject_first(self):
         positive, _negative, _report, base, foreground, background = self.result()
