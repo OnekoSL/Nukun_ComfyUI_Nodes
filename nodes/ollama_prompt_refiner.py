@@ -14,7 +14,7 @@ except ImportError:
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = "autoren-darkidol-llama-3-1-8b:latest"
-DEFAULT_OLLAMA_CONTEXT_LENGTH = 8192
+DEFAULT_OLLAMA_CONTEXT_LENGTH = 4096
 OLLAMA_CONTEXT_LENGTH_CHOICES = ("2048", "4096", "8192", "16384", "32768", "65536", "131072")
 DEFAULT_STYLE_CLUSTER = 430
 FALLBACK_MODES = ("adaptive", "strict", "continue")
@@ -595,6 +595,50 @@ def _normalize_generate_url(ollama_url):
     if url.endswith("/api/generate"):
         return url
     return f"{url}/api/generate"
+
+
+def _unload_ollama_model(ollama_url, model, timeout_seconds=10):
+    payload = {
+        "model": str(model).strip() or DEFAULT_OLLAMA_MODEL,
+        "keep_alive": 0,
+        "stream": False,
+    }
+    request = urllib.request.Request(
+        _normalize_generate_url(ollama_url),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=min(10, max(1, int(timeout_seconds)))
+        ) as response:
+            response_data = response.read().decode("utf-8")
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Ollama HTTP {error.code} while unloading: {body}") from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"could not reach Ollama while unloading: {error.reason}") from error
+    except TimeoutError as error:
+        raise RuntimeError("Ollama model unload timed out") from error
+
+    try:
+        envelope = json.loads(response_data)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"invalid Ollama unload response: {error}") from error
+    if envelope.get("error"):
+        raise RuntimeError(f"Ollama unload failed: {envelope['error']}")
+    if not envelope.get("done", False):
+        raise RuntimeError("Ollama unload did not finish cleanly")
+
+
+def _unload_after_run(ollama_url, model, timeout_seconds, enabled):
+    if not enabled:
+        return
+    try:
+        _unload_ollama_model(ollama_url, model, timeout_seconds)
+    except RuntimeError as error:
+        print(f"[Nukun] Could not unload Ollama model after run: {error}")
 
 
 def _normalize_tags_url(ollama_url):
@@ -4699,6 +4743,13 @@ class NukunOllamaPromptRefiner:
                         "tooltip": "single keeps the classic refiner; plan_compile adds a planner; plan_compile_review also adds semantic review and at most one correction.",
                     },
                 ),
+                "unload_after_run": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "Unload the Ollama model after the complete node run so ComfyUI can reclaim RAM and VRAM.",
+                    },
+                ),
             },
         }
 
@@ -4870,7 +4921,7 @@ class NukunOllamaPromptRefiner:
             fallback_mode=mode,
         )
 
-    def refine(
+    def _refine(
         self,
         word_salad,
         ollama_url,
@@ -5172,6 +5223,55 @@ class NukunOllamaPromptRefiner:
             json_text(review_output) if review_output else "{}",
         )
 
+    def refine(
+        self,
+        word_salad,
+        ollama_url,
+        ollama_model,
+        target_profile,
+        seed,
+        temperature,
+        top_p,
+        style_cluster,
+        timeout_seconds,
+        context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH,
+        style_anchor="",
+        left="",
+        right="",
+        top="",
+        bottom="",
+        fallback_mode=DEFAULT_FALLBACK_MODE,
+        pipeline_mode=DEFAULT_PIPELINE_MODE,
+        unload_after_run=True,
+    ):
+        try:
+            return self._refine(
+                word_salad,
+                ollama_url,
+                ollama_model,
+                target_profile,
+                seed,
+                temperature,
+                top_p,
+                style_cluster,
+                timeout_seconds,
+                context_length,
+                style_anchor,
+                left,
+                right,
+                top,
+                bottom,
+                fallback_mode,
+                pipeline_mode,
+            )
+        finally:
+            _unload_after_run(
+                ollama_url,
+                ollama_model,
+                timeout_seconds,
+                bool(unload_after_run),
+            )
+
     @classmethod
     def IS_CHANGED(
         cls,
@@ -5192,6 +5292,7 @@ class NukunOllamaPromptRefiner:
         bottom="",
         fallback_mode=DEFAULT_FALLBACK_MODE,
         pipeline_mode=DEFAULT_PIPELINE_MODE,
+        unload_after_run=True,
     ):
         pipeline = _normalize_pipeline_mode(pipeline_mode)
         digest = hashlib.sha256()
@@ -5215,6 +5316,7 @@ class NukunOllamaPromptRefiner:
             if pipeline != "single" or _normalize_target_profile(target_profile) in NATURAL_FALLBACK_PROFILES
             else "ignored",
             pipeline,
+            bool(unload_after_run),
         ):
             digest.update(str(value).encode("utf-8"))
             digest.update(b"\0")

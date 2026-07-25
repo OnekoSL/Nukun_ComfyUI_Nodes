@@ -70,6 +70,7 @@ def refine_kwargs(profile="pony_v7", pipeline_mode="plan_compile", fallback_mode
         "bottom": "",
         "fallback_mode": fallback_mode,
         "pipeline_mode": pipeline_mode,
+        "unload_after_run": False,
     }
 
 
