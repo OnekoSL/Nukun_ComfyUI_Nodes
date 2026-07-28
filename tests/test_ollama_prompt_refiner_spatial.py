@@ -219,6 +219,7 @@ class SpatialPromptInputTests(unittest.TestCase):
                 "",
                 left="a red fox",
                 bottom="wet cobblestones",
+                unload_after_run=False,
             )
         self.assertEqual(request.call_count, 3)
         for call in request.call_args_list:
@@ -252,6 +253,7 @@ class SpatialPromptInputTests(unittest.TestCase):
                 "anime style furry anthro",
                 left="boy nude presenting penis cum",
                 bottom="furry latex thighhighs vaginal sex nipples lying presenting anus",
+                unload_after_run=False,
             )
         self.assertEqual(request.call_count, 1)
         self.assertIn("On the left, boy nude presenting penis cum.", result[5])
@@ -347,6 +349,7 @@ class SpatialPromptInputTests(unittest.TestCase):
             style_anchor="",
             left="a red fox beside a mossy stone",
             bottom="wet cobblestones",
+            unload_after_run=False,
         )
         for responses, expected_calls in (
             (("invalid", self.ollama_response_with_integrated_left()), 2),
@@ -399,9 +402,9 @@ class SpatialPromptInputTests(unittest.TestCase):
             30,
         )
         with self.assertRaisesRegex(RuntimeError, "must contain text"):
-            node.refine(*common)
+            node.refine(*common, unload_after_run=False)
         with self.assertRaisesRegex(RuntimeError, "spatial-only input requires a natural prompt profile"):
-            node.refine(*common, left="a red fox")
+            node.refine(*common, left="a red fox", unload_after_run=False)
 
     def test_cache_hash_changes_for_each_spatial_field(self):
         common = dict(

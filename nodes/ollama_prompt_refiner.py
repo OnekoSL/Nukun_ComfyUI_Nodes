@@ -14,8 +14,10 @@ except ImportError:
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = "autoren-darkidol-llama-3-1-8b:latest"
-DEFAULT_OLLAMA_CONTEXT_LENGTH = 8192
+DEFAULT_OLLAMA_CONTEXT_LENGTH = 4096
 OLLAMA_CONTEXT_LENGTH_CHOICES = ("2048", "4096", "8192", "16384", "32768", "65536", "131072")
+REKA_FLASH_TOP_K = 1024
+REKA_FLASH_REASONING_BUDGET_MULTIPLIER = 2
 DEFAULT_STYLE_CLUSTER = 430
 FALLBACK_MODES = ("adaptive", "strict", "continue")
 DEFAULT_FALLBACK_MODE = "adaptive"
@@ -597,11 +599,78 @@ def _normalize_generate_url(ollama_url):
     return f"{url}/api/generate"
 
 
+def _unload_ollama_model(ollama_url, model, timeout_seconds=10):
+    payload = {
+        "model": str(model).strip() or DEFAULT_OLLAMA_MODEL,
+        "keep_alive": 0,
+        "stream": False,
+    }
+    request = urllib.request.Request(
+        _normalize_generate_url(ollama_url),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=min(10, max(1, int(timeout_seconds)))
+        ) as response:
+            response_data = response.read().decode("utf-8")
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Ollama HTTP {error.code} while unloading: {body}") from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"could not reach Ollama while unloading: {error.reason}") from error
+    except TimeoutError as error:
+        raise RuntimeError("Ollama model unload timed out") from error
+
+    try:
+        envelope = json.loads(response_data)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"invalid Ollama unload response: {error}") from error
+    if envelope.get("error"):
+        raise RuntimeError(f"Ollama unload failed: {envelope['error']}")
+    if not envelope.get("done", False):
+        raise RuntimeError("Ollama unload did not finish cleanly")
+
+
+def _unload_after_run(ollama_url, model, timeout_seconds, enabled):
+    if not enabled:
+        return
+    try:
+        _unload_ollama_model(ollama_url, model, timeout_seconds)
+    except RuntimeError as error:
+        print(f"[Nukun] Could not unload Ollama model after run: {error}")
+
+
 def _normalize_tags_url(ollama_url):
     url = str(ollama_url).strip() or DEFAULT_OLLAMA_URL
     if not url.startswith(("http://", "https://")):
         url = f"http://{url}"
     return f"{url.rstrip('/')}/api/tags"
+
+
+def _normalize_show_url(ollama_url):
+    url = str(ollama_url).strip() or DEFAULT_OLLAMA_URL
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+    return f"{url.rstrip('/')}/api/show"
+
+
+def _ollama_model_capabilities(ollama_url, model):
+    payload = {"model": str(model).strip() or DEFAULT_OLLAMA_MODEL}
+    request = urllib.request.Request(
+        _normalize_show_url(ollama_url),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError):
+        return frozenset()
+    return frozenset(str(value).strip().lower() for value in data.get("capabilities", ()) if value)
 
 
 def _ollama_model_names(ollama_url=DEFAULT_OLLAMA_URL):
@@ -659,27 +728,32 @@ def _schema_keys(output_schema):
     return tuple(str(key) for key in output_schema.get("properties", {}).keys())
 
 
-def _reka_output_contract(output_schema=OUTPUT_SCHEMA):
+def _reka_output_contract(output_schema=OUTPUT_SCHEMA, reasoning=True):
+    schema = json.dumps(output_schema, ensure_ascii=False, separators=(",", ":"))
+    reasoning_instructions = (
+        """First think briefly inside <reasoning> and </reasoning> tags.
+Keep the reasoning concise and below 400 tokens so enough output budget remains for the final JSON.
+After </reasoning>, return only the final JSON object without markdown, notes, or commentary."""
+        if reasoning
+        else "Return only the final JSON object without reasoning, markdown, notes, or commentary."
+    )
     if output_schema is OUTPUT_SCHEMA:
-        return """You are a JSON-only image prompt refiner.
-Use the user's prompt-building instructions, but return only the final JSON object.
-Do not reveal reasoning, analysis, markdown, code fences, notes, or commentary.
-Do not output <reasoning>, </reasoning>, <think>, or </think> tags.
-The JSON object must contain exactly these string keys:
-base_prompt, foreground_prompt, background_prompt, negative, report"""
-    keys = ", ".join(_schema_keys(output_schema))
+        return f"""You are a JSON-only image prompt refiner.
+Use the user's prompt-building instructions carefully.
+{reasoning_instructions}
+The final JSON must satisfy this schema exactly:
+{schema}"""
     return f"""You are a JSON-only prompt-processing assistant.
-Use the user's task instructions, but return only the final JSON object.
-Do not reveal reasoning, analysis, markdown, code fences, notes, or commentary.
-Do not output <reasoning>, </reasoning>, <think>, or </think> tags.
-The JSON object must contain exactly these keys:
-{keys}"""
+Use the user's task instructions carefully.
+{reasoning_instructions}
+The final JSON must satisfy this schema exactly:
+{schema}"""
 
 
-def _build_reka_prompt(prompt, output_schema=OUTPUT_SCHEMA):
+def _build_reka_prompt(prompt, output_schema=OUTPUT_SCHEMA, reasoning=True):
     return (
         "human: "
-        + _reka_output_contract(output_schema)
+        + _reka_output_contract(output_schema, reasoning)
         + "\n\nTask instructions:\n"
         + str(prompt).strip()
         + "\n\nFinal answer: return exactly one valid JSON object and nothing else."
@@ -708,26 +782,39 @@ def _request_ollama(
     output_schema=OUTPUT_SCHEMA,
     system_instructions=SYSTEM_INSTRUCTIONS,
     num_predict=1400,
+    reasoning=True,
 ):
     model_name = str(model).strip() or DEFAULT_OLLAMA_MODEL
     is_reka = _is_reka_flash_model(model_name)
+    supports_thinking = bool(reasoning) and not is_reka and "thinking" in _ollama_model_capabilities(
+        ollama_url, model_name
+    )
+    uses_reasoning = (is_reka and bool(reasoning)) or supports_thinking
     options = {
         "seed": int(seed),
         "temperature": float(temperature),
         "top_p": float(top_p),
         "num_ctx": _normalize_context_length(context_length),
-        "num_predict": int(num_predict),
+        "num_predict": (
+            int(num_predict) * REKA_FLASH_REASONING_BUDGET_MULTIPLIER
+            if uses_reasoning
+            else int(num_predict)
+        ),
     }
     if is_reka:
         options["stop"] = ["<sep>", "<|endoftext|>"]
+        options["top_k"] = REKA_FLASH_TOP_K
 
     payload = {
         "model": model_name,
-        "prompt": _build_reka_prompt(prompt, output_schema) if is_reka else prompt,
+        "prompt": _build_reka_prompt(prompt, output_schema, reasoning) if is_reka else prompt,
         "stream": False,
-        "format": output_schema,
         "options": options,
     }
+    if supports_thinking:
+        payload["think"] = True
+    if not uses_reasoning:
+        payload["format"] = output_schema
     if not is_reka:
         payload["system"] = str(system_instructions)
 
@@ -804,7 +891,9 @@ def _validate_result(data):
     return values
 
 
-def _normalized_string_list(value, key):
+def _normalized_string_list(value, key, coerce_string=False):
+    if coerce_string and isinstance(value, str):
+        value = re.split(r"[,;|\n]+", value)
     if not isinstance(value, list):
         raise ValueError(f"{key} must be an array")
     result = []
@@ -832,7 +921,7 @@ def _validate_prompt_plan(data):
             raise ValueError(f"{key} must be a string")
         plan[key] = data[key].strip()
     for key in PLAN_LIST_KEYS:
-        plan[key] = _normalized_string_list(data[key], key)
+        plan[key] = _normalized_string_list(data[key], key, coerce_string=True)
     if not any(plan[key] for key in PLAN_KEYS):
         raise ValueError("planner JSON contains no usable content")
     return plan
@@ -856,6 +945,62 @@ def _enforce_fixed_plan_inputs(plan, style_anchor, left="", right="", top="", bo
     return plan
 
 
+def _build_local_prompt_plan(
+    target_profile,
+    word_salad,
+    style_anchor,
+    left="",
+    right="",
+    top="",
+    bottom="",
+):
+    spatial = _spatial_values(left, right, top, bottom)
+    subject_source = str(word_salad).strip() or " ".join(
+        value for value in spatial.values() if value
+    )
+    source_terms = _curated_terms(subject_source, limit=24, filter_low_value=False)
+    subject_terms = source_terms[:2]
+    subject = " ".join(subject_terms)
+    candidate_data = _candidate_data(target_profile, word_salad, style_anchor)
+    background_terms = candidate_data.get("background_candidates", [])[:6]
+    style_terms = candidate_data.get("style_candidates", [])[:6]
+    plan = {
+        "subject": subject,
+        "action": "",
+        "environment": " ".join(background_terms),
+        "style": str(style_anchor).strip() or " ".join(style_terms),
+        "composition": "",
+        "lighting": "",
+        "camera": "",
+        "subject_details": source_terms[2:14],
+        "spatial_relations": [],
+        "required_elements": [subject] if subject else [],
+        "avoid": [],
+        "discarded_terms": _candidate_discarded_noise(
+            word_salad,
+            style_anchor,
+            limit=18,
+        ),
+    }
+    plan = _enforce_fixed_plan_inputs(
+        plan,
+        style_anchor,
+        left,
+        right,
+        top,
+        bottom,
+    )
+    return _validate_plan_source(
+        plan,
+        word_salad,
+        style_anchor,
+        left,
+        right,
+        top,
+        bottom,
+    )
+
+
 def _validate_review(data):
     if not isinstance(data, dict):
         raise ValueError("reviewer JSON root is not an object")
@@ -871,11 +1016,24 @@ def _validate_review(data):
             raise ValueError(f"{key} must be a boolean")
         review[key] = data[key]
     for key in REVIEW_LIST_KEYS:
-        review[key] = _normalized_string_list(data[key], key)
+        review[key] = _normalized_string_list(data[key], key, coerce_string=True)
     if not isinstance(data["summary"], str):
         raise ValueError("summary must be a string")
     review["summary"] = data["summary"].strip()
     return review
+
+
+def _normalize_review_consistency(review, local_issues=()):
+    normalized = {
+        key: (list(value) if isinstance(value, list) else value)
+        for key, value in review.items()
+    }
+    if normalized["missing_elements"]:
+        normalized["all_required_preserved"] = False
+    has_findings = any(normalized[key] for key in REVIEW_LIST_KEYS)
+    if local_issues or has_findings or not normalized["all_required_preserved"]:
+        normalized["needs_revision"] = True
+    return normalized
 
 
 def _normalize_style_cluster(style_cluster):
@@ -4109,6 +4267,8 @@ def _target_profile_instructions(target_profile, style_cluster):
 
 def _candidate_few_shot_example(target_profile, word_salad, style_anchor):
     target_profile = _normalize_target_profile(target_profile)
+    if target_profile not in ("pony_v6", "illustrious"):
+        return ""
     data = _candidate_data(target_profile, word_salad, style_anchor)
     if not data:
         return ""
@@ -4138,37 +4298,6 @@ foreground_prompt => {foreground_prompt}
 background_prompt => {background_prompt}
 negative => low quality worst quality bad anatomy bad hands malformed fingers poorly drawn face text watermark logo blurry
 report => Built an Illustrious split prompt from sorted visual candidates."""
-    if target_profile == "anima":
-        base = _anima_tag_text(
-            [*fixed_base[:8], *style[:2], "anime illustration", "digital art"],
-            limit=12,
-            fallback="masterpiece, best quality, score_9, score_8_up, score_7_up, anime illustration",
-        )
-        foreground_prompt = (
-            "A copper-haired archivist stands beside a rain-streaked window and studies a small blue crystal. "
-            "Her coat has worn leather seams, silver buttons, and damp fabric edges. "
-            "She holds the crystal close to her chest while her careful smile shows quiet curiosity."
-        )
-        background_prompt = (
-            "A narrow workshop surrounds her with brass tools, glass jars, and stacked field notes. "
-            "Warm lamplight crosses the wooden table and fades into the rainy city outside. "
-            "The calm light makes her focused expression feel private and memorable."
-        )
-        return f"""Example field values for Anima using the current candidates only:
-base_prompt => {base}
-foreground_prompt => {foreground_prompt}
-background_prompt => {background_prompt}
-negative => worst quality, low quality, score_1, score_2, score_3, artist name, bad anatomy, bad hands, text, watermark, blurry
-report => Built a natural Anima prompt from sorted visual candidates."""
-    if target_profile == "krea2":
-        anchor = str(style_anchor).strip()
-        anchor_prefix = f"{anchor}, " if anchor else ""
-        return f"""Example field values for Krea 2 (positive is joined subject-first):
-base_prompt => {anchor_prefix}A cinematic medium shot uses warm window light, muted blue and copper colors, shallow focal depth, and realistic glass and metal reflections.
-foreground_prompt => One copper-haired archivist opens a worn leather book beside a compact brass machine. She holds a palm-sized blue crystal above the page, where its cool glow reflects across her fingers, silver buttons, damp coat seams, and three clear glass bottles.
-background_prompt => A narrow wooden workshop surrounds her. Tall rain-streaked windows stand behind the table, with blurred city rooftops beyond them. A copper lamp to her left creates warm contact shadows beneath the tools and books.
-negative => worst quality, low quality, blurry, bad anatomy, bad hands, extra fingers, duplicate subject, distorted geometry, unreadable text, watermark, logo
-report => Built a natural Krea 2 description with explicit materials, lighting, quantities, and spatial relationships."""
     return ""
 
 
@@ -4304,6 +4433,8 @@ Fixed spatial inputs:
 Rules:
 - The target profile is an output-format label, never an image subject or source concept.
 - Never place the target profile name in subject, subject_details, required_elements, or any other content field unless the user supplied it as content.
+- Write subject as a short phrase copied verbatim from the source. Do not paraphrase it, generalize it, or infer a gender, species, role, or character type.
+- Keep required_elements source-verbatim as well. Put interpretations and visual elaboration only in the other planning fields.
 - Classify useful source concepts without writing the final prompt.
 - Put every fixed style-anchor and non-empty spatial concept in required_elements or spatial_relations.
 - You may put weak or incoherent random vocabulary in discarded_terms.
@@ -4353,6 +4484,8 @@ Local validation findings:
 {json.dumps(local_issues, ensure_ascii=False)}
 
 Set needs_revision when a required concept is missing, the result contradicts the source, an unsupported detail was added, a target-profile rule is broken, or local findings are non-empty.
+Judge only the compiled result. Do not copy target-rule examples or required negative-prompt terms into profile_violations.
+When any finding list is non-empty, set needs_revision to true. When missing_elements is non-empty, set all_required_preserved to false.
 Return exactly these JSON keys: {", ".join(REVIEW_KEYS)}."""
 
 
@@ -4485,6 +4618,9 @@ def _local_pipeline_issues(
     for element in prompt_plan.get("avoid", []):
         if _concept_is_present(element, positive):
             issues.append(f"avoided element appears in positive: {element}")
+    planned_subject = str(prompt_plan.get("subject", "")).strip()
+    if planned_subject and not _concept_is_present(planned_subject, foreground_prompt):
+        issues.append(f"planned subject missing from foreground_prompt: {planned_subject}")
     for region, detail in _spatial_values(left, right, top, bottom).items():
         if detail and not _spatial_region_is_integrated(region, detail, positive):
             issues.append(f"spatial input not integrated: {region}")
@@ -4607,7 +4743,7 @@ class NukunOllamaPromptRefiner:
                         "min": 0.0,
                         "max": 2.0,
                         "step": 0.01,
-                        "tooltip": "Ollama generation temperature. Lower is more deterministic.",
+                        "tooltip": "Ollama generation temperature. Lower is more deterministic; Reka Flash 3 recommends 0.60.",
                     },
                 ),
                 "top_p": (
@@ -4617,7 +4753,7 @@ class NukunOllamaPromptRefiner:
                         "min": 0.01,
                         "max": 1.0,
                         "step": 0.01,
-                        "tooltip": "Ollama nucleus sampling value.",
+                        "tooltip": "Ollama nucleus sampling value. Reka Flash 3 recommends 0.95.",
                     },
                 ),
                 "style_cluster": (
@@ -4635,7 +4771,7 @@ class NukunOllamaPromptRefiner:
                         "default": 120,
                         "min": 1,
                         "max": 600,
-                        "tooltip": "Maximum time to wait for each Ollama request.",
+                        "tooltip": "Maximum time to wait for each Ollama request. Use 180 or more for a large reasoning model with plan_compile_review.",
                     },
                 ),
                 "context_length": (
@@ -4697,6 +4833,13 @@ class NukunOllamaPromptRefiner:
                     {
                         "default": DEFAULT_PIPELINE_MODE,
                         "tooltip": "single keeps the classic refiner; plan_compile adds a planner; plan_compile_review also adds semantic review and at most one correction.",
+                    },
+                ),
+                "unload_after_run": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "Unload the Ollama model after the complete node run so ComfyUI can reclaim RAM and VRAM.",
                     },
                 ),
             },
@@ -4870,7 +5013,7 @@ class NukunOllamaPromptRefiner:
             fallback_mode=mode,
         )
 
-    def refine(
+    def _refine(
         self,
         word_salad,
         ollama_url,
@@ -4916,6 +5059,7 @@ class NukunOllamaPromptRefiner:
         profile = _normalize_target_profile(target_profile)
         fallback = _normalize_fallback_mode(fallback_mode)
         plan = {}
+        planner_status = {}
         review = {}
         review_error = ""
         correction_applied = False
@@ -4923,6 +5067,12 @@ class NukunOllamaPromptRefiner:
 
         def json_text(value):
             return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+        def plan_output():
+            output = dict(plan)
+            if planner_status:
+                output["planner_status"] = dict(planner_status)
+            return json_text(output) if output else "{}"
 
         def strict_error(stage, error):
             raise RuntimeError(f"Ollama Prompt Refiner: {stage} stage failed: {error}") from error
@@ -4951,7 +5101,7 @@ class NukunOllamaPromptRefiner:
                 f"pipeline_mode={pipeline}; adaptive fallback to single after {stage} failure: {error}",
             )
             review_output = {"stage_error": f"{stage}: {error}"} if review else {}
-            return (*single_result, json_text(plan) if plan else "{}", json_text(review_output) if review_output else "{}")
+            return (*single_result, plan_output(), json_text(review_output) if review_output else "{}")
 
         try:
             planner_response = _request_ollama(
@@ -4966,6 +5116,7 @@ class NukunOllamaPromptRefiner:
                 output_schema=PLAN_SCHEMA,
                 system_instructions=PLANNER_SYSTEM_INSTRUCTIONS,
                 num_predict=700,
+                reasoning=False,
             )
             plan = _validate_prompt_plan(_extract_json_object(planner_response))
             plan = _enforce_fixed_plan_inputs(plan, style_anchor, left, right, top, bottom)
@@ -4973,11 +5124,25 @@ class NukunOllamaPromptRefiner:
             stages.append("planner")
         except (RuntimeError, ValueError) as error:
             plan = {}
+            planner_status = {
+                "status": "failed",
+                "stage_error": str(error),
+            }
             if fallback == "strict":
                 strict_error("planner", error)
             if fallback == "adaptive":
                 return adaptive_result("planner", error)
-            stages.append("planner_skipped")
+            plan = _build_local_prompt_plan(
+                profile,
+                word_salad,
+                style_anchor,
+                left,
+                right,
+                top,
+                bottom,
+            )
+            planner_status["status"] = "local_fallback"
+            stages.append("planner_local_fallback")
 
         compiler_result = None
         try:
@@ -5075,8 +5240,12 @@ class NukunOllamaPromptRefiner:
                     output_schema=REVIEW_SCHEMA,
                     system_instructions=REVIEWER_SYSTEM_INSTRUCTIONS,
                     num_predict=500,
+                    reasoning=False,
                 )
-                review = _validate_review(_extract_json_object(reviewer_response))
+                review = _normalize_review_consistency(
+                    _validate_review(_extract_json_object(reviewer_response)),
+                    local_issues,
+                )
                 stages.append("reviewer")
             except (RuntimeError, ValueError) as error:
                 if fallback == "strict":
@@ -5149,6 +5318,41 @@ class NukunOllamaPromptRefiner:
             strict_error("final_validation", ValueError("; ".join(final_issues)))
         if final_issues and fallback == "adaptive":
             return adaptive_result("final_validation", ValueError("; ".join(final_issues)))
+        if final_issues and fallback == "continue":
+            continued_issues = list(final_issues)
+            compiler_result = _local_fallback_result(
+                profile,
+                word_salad,
+                style_anchor,
+                style_cluster,
+                "pipeline final validation: " + "; ".join(continued_issues),
+                left,
+                right,
+                top,
+                bottom,
+                fallback_mode="adaptive",
+                stage="pipeline_final_continue",
+            )
+            stages.append("final_local_fallback")
+            final_issues = _local_pipeline_issues(
+                profile,
+                plan,
+                compiler_result,
+                style_anchor,
+                left,
+                right,
+                top,
+                bottom,
+            )
+            if final_issues:
+                review_error = "; ".join(
+                    value
+                    for value in (
+                        review_error,
+                        "final local fallback: " + "; ".join(final_issues),
+                    )
+                    if value
+                )
 
         detail = (
             f"pipeline_mode={pipeline}; stages={','.join(stages)}; "
@@ -5168,9 +5372,58 @@ class NukunOllamaPromptRefiner:
             review_output["final_local_issues"] = final_issues
         return (
             *compiler_result,
-            json_text(plan) if plan else "{}",
+            plan_output(),
             json_text(review_output) if review_output else "{}",
         )
+
+    def refine(
+        self,
+        word_salad,
+        ollama_url,
+        ollama_model,
+        target_profile,
+        seed,
+        temperature,
+        top_p,
+        style_cluster,
+        timeout_seconds,
+        context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH,
+        style_anchor="",
+        left="",
+        right="",
+        top="",
+        bottom="",
+        fallback_mode=DEFAULT_FALLBACK_MODE,
+        pipeline_mode=DEFAULT_PIPELINE_MODE,
+        unload_after_run=True,
+    ):
+        try:
+            return self._refine(
+                word_salad,
+                ollama_url,
+                ollama_model,
+                target_profile,
+                seed,
+                temperature,
+                top_p,
+                style_cluster,
+                timeout_seconds,
+                context_length,
+                style_anchor,
+                left,
+                right,
+                top,
+                bottom,
+                fallback_mode,
+                pipeline_mode,
+            )
+        finally:
+            _unload_after_run(
+                ollama_url,
+                ollama_model,
+                timeout_seconds,
+                bool(unload_after_run),
+            )
 
     @classmethod
     def IS_CHANGED(
@@ -5192,6 +5445,7 @@ class NukunOllamaPromptRefiner:
         bottom="",
         fallback_mode=DEFAULT_FALLBACK_MODE,
         pipeline_mode=DEFAULT_PIPELINE_MODE,
+        unload_after_run=True,
     ):
         pipeline = _normalize_pipeline_mode(pipeline_mode)
         digest = hashlib.sha256()
@@ -5215,6 +5469,7 @@ class NukunOllamaPromptRefiner:
             if pipeline != "single" or _normalize_target_profile(target_profile) in NATURAL_FALLBACK_PROFILES
             else "ignored",
             pipeline,
+            bool(unload_after_run),
         ):
             digest.update(str(value).encode("utf-8"))
             digest.update(b"\0")

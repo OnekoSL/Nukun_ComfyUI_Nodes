@@ -17,6 +17,7 @@ try:
         _normalize_context_length,
         _normalize_generate_url,
         _strip_reasoning_blocks,
+        _unload_after_run,
     )
 except ImportError:
     from ollama_prompt_refiner import (
@@ -26,12 +27,13 @@ except ImportError:
         _normalize_context_length,
         _normalize_generate_url,
         _strip_reasoning_blocks,
+        _unload_after_run,
     )
 
 
 DEFAULT_OLLAMA_VISION_MODEL = "user-v4/joycaption-beta"
 ALPHA_TWO_OLLAMA_MODEL = "hf.co/Jobaar/Llama-JoyCaption-Alpha-Two-GGUF:F16"
-DEFAULT_OLLAMA_CONTEXT_LENGTH = 8192
+DEFAULT_OLLAMA_CONTEXT_LENGTH = 4096
 DEFAULT_RESIZE_LONG_EDGE = 1024
 CAPTION_MODES = ("natural_caption", "danbooru_tags", "pony_source", "refiner_seed")
 OUTPUT_KEYS = ("caption", "tags", "text_seed", "report", "hiresfix_text")
@@ -542,6 +544,13 @@ class NukunOllamaVisionCaptioner:
                         "tooltip": "Optional extra captioning instructions.",
                     },
                 ),
+                "unload_after_run": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "Unload the Ollama model after the complete node run so ComfyUI can reclaim RAM and VRAM.",
+                    },
+                ),
             },
         }
 
@@ -551,7 +560,7 @@ class NukunOllamaVisionCaptioner:
     CATEGORY = "Nukun/Image"
     DESCRIPTION = "Uses a local Ollama vision model to caption one ComfyUI image and produce text for prompt refining."
 
-    def caption(
+    def _caption(
         self,
         image,
         ollama_url,
@@ -620,6 +629,43 @@ class NukunOllamaVisionCaptioner:
                     f"initial={first_error}; repair={second_error}",
                 )
 
+    def caption(
+        self,
+        image,
+        ollama_url,
+        ollama_model,
+        caption_mode,
+        seed,
+        temperature,
+        top_p,
+        timeout_seconds,
+        context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH,
+        resize_long_edge=DEFAULT_RESIZE_LONG_EDGE,
+        custom_instruction="",
+        unload_after_run=True,
+    ):
+        try:
+            return self._caption(
+                image,
+                ollama_url,
+                ollama_model,
+                caption_mode,
+                seed,
+                temperature,
+                top_p,
+                timeout_seconds,
+                context_length,
+                resize_long_edge,
+                custom_instruction,
+            )
+        finally:
+            _unload_after_run(
+                ollama_url,
+                str(ollama_model).strip() or DEFAULT_OLLAMA_VISION_MODEL,
+                timeout_seconds,
+                bool(unload_after_run),
+            )
+
     @classmethod
     def IS_CHANGED(
         cls,
@@ -634,6 +680,7 @@ class NukunOllamaVisionCaptioner:
         context_length=DEFAULT_OLLAMA_CONTEXT_LENGTH,
         resize_long_edge=DEFAULT_RESIZE_LONG_EDGE,
         custom_instruction="",
+        unload_after_run=True,
     ):
         digest = hashlib.sha256()
         first = image[0] if getattr(image, "ndim", 0) == 4 else image
@@ -653,6 +700,7 @@ class NukunOllamaVisionCaptioner:
             _normalize_context_length(context_length),
             int(resize_long_edge),
             custom_instruction,
+            bool(unload_after_run),
         ):
             digest.update(str(value).encode("utf-8"))
             digest.update(b"\0")

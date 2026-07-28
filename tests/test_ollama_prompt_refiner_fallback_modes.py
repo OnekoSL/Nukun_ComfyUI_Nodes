@@ -43,6 +43,7 @@ def refine_kwargs(profile="anima", fallback_mode="adaptive", **overrides):
         "top": "",
         "bottom": "",
         "fallback_mode": fallback_mode,
+        "unload_after_run": False,
     }
     values.update(overrides)
     return values

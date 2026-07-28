@@ -1,7 +1,14 @@
 # Changelog
 
+- Enabled actual reasoning for Ollama models advertised with the `thinking` capability and for Reka Flash's inline `<reasoning>` format by removing the conflicting JSON grammar only on those paths, stripping reasoning before validation, and reserving a larger output-token budget. Reka Flash also receives its recommended `top_k = 1024`.
+- Grounded Reka's unconstrained final answer with the complete JSON schema and recover harmless stringified planner/reviewer list fields locally instead of abandoning a long pipeline run.
+- Capped requested Reka reasoning at 400 tokens so slow Q4 builds retain enough generation budget to reach their final JSON.
+- Kept reasoning on Reka compiler/correction work but switched planner and reviewer classification stages to fast schema-constrained JSON so Q4 models cannot exhaust those stages in an unbounded reasoning trace.
+
 ## Unreleased
 
+- Prevented Anima and Krea2 compiler prompts from leaking static example subjects, replaced a failed planner with a source-grounded local plan in `continue` mode, exposed the planner error in `plan_json`, normalized contradictory reviewer flags, and locally rebuilt results whose planned subject is still missing after correction.
+- Made both Ollama nodes default to a 4096-token context and automatically unload their selected model after the complete node run, with an optional `unload_after_run` switch for prompt-only workflows that prefer a warm model.
 - Added optional `plan_compile` and `plan_compile_review` Ollama Prompt Refiner pipelines with structured planning, local validation, semantic review, one bounded correction, appended plan/review JSON outputs, and stage-aware fallback behavior for every target profile.
 - Added `resources/visual_art_styles.csv` with 250 original, model-neutral style phrases across ten visual-art categories, inspired in breadth by [ComfyUI-NO8D-controls](https://github.com/no8d/ComfyUI-NO8D-controls) without copying its long prompt descriptions or named styles.
 - Strengthened Anima spatial prompting so left, right, top, and bottom inputs form one continuous camera view, merge repeated character details into one figure, and discourage split screens, panels, and duplicate views.
