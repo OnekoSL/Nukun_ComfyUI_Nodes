@@ -86,9 +86,17 @@ class PipelineSchemaTests(unittest.TestCase):
         data = plan_data(required=["dragon", "dragon", "  moonlight  "])
         plan = refiner._validate_prompt_plan(data)
         self.assertEqual(plan["required_elements"], ["dragon", "moonlight"])
-        data["avoid"] = "modern objects"
+        data["avoid"] = {"unexpected": "object"}
         with self.assertRaisesRegex(ValueError, "avoid must be an array"):
             refiner._validate_prompt_plan(data)
+
+    def test_plan_validation_recovers_stringified_list_fields(self):
+        data = plan_data()
+        data["subject_details"] = "red scales, sharp horns"
+        data["avoid"] = ""
+        plan = refiner._validate_prompt_plan(data)
+        self.assertEqual(plan["subject_details"], ["red scales", "sharp horns"])
+        self.assertEqual(plan["avoid"], [])
 
     def test_fixed_style_and_spatial_inputs_are_forced_into_plan(self):
         plan = refiner._enforce_fixed_plan_inputs(
@@ -109,6 +117,16 @@ class PipelineSchemaTests(unittest.TestCase):
         bad_required = refiner._validate_prompt_plan(plan_data(required=["golden necklace"]))
         with self.assertRaisesRegex(ValueError, "required elements are not grounded"):
             refiner._validate_plan_source(bad_required, "red dragon mountain valley", "")
+
+    def test_planner_requires_source_verbatim_subject_and_requirements(self):
+        prompt = refiner._build_planner_prompt(
+            "anima",
+            "furry anthro orangutan waterfall",
+            "",
+        )
+        self.assertIn("copied verbatim from the source", prompt)
+        self.assertIn("Do not paraphrase", prompt)
+        self.assertIn("required_elements source-verbatim", prompt)
 
     def test_local_validation_finds_missing_required_and_avoided_content(self):
         plan = refiner._validate_prompt_plan(plan_data(required=["dragon", "crystal crown"], avoid=["city"]))

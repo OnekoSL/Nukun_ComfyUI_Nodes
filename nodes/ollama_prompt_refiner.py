@@ -16,6 +16,8 @@ DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = "autoren-darkidol-llama-3-1-8b:latest"
 DEFAULT_OLLAMA_CONTEXT_LENGTH = 4096
 OLLAMA_CONTEXT_LENGTH_CHOICES = ("2048", "4096", "8192", "16384", "32768", "65536", "131072")
+REKA_FLASH_TOP_K = 1024
+REKA_FLASH_REASONING_BUDGET_MULTIPLIER = 2
 DEFAULT_STYLE_CLUSTER = 430
 FALLBACK_MODES = ("adaptive", "strict", "continue")
 DEFAULT_FALLBACK_MODE = "adaptive"
@@ -648,6 +650,29 @@ def _normalize_tags_url(ollama_url):
     return f"{url.rstrip('/')}/api/tags"
 
 
+def _normalize_show_url(ollama_url):
+    url = str(ollama_url).strip() or DEFAULT_OLLAMA_URL
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+    return f"{url.rstrip('/')}/api/show"
+
+
+def _ollama_model_capabilities(ollama_url, model):
+    payload = {"model": str(model).strip() or DEFAULT_OLLAMA_MODEL}
+    request = urllib.request.Request(
+        _normalize_show_url(ollama_url),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError):
+        return frozenset()
+    return frozenset(str(value).strip().lower() for value in data.get("capabilities", ()) if value)
+
+
 def _ollama_model_names(ollama_url=DEFAULT_OLLAMA_URL):
     models = []
     request = urllib.request.Request(_normalize_tags_url(ollama_url), method="GET")
@@ -703,27 +728,32 @@ def _schema_keys(output_schema):
     return tuple(str(key) for key in output_schema.get("properties", {}).keys())
 
 
-def _reka_output_contract(output_schema=OUTPUT_SCHEMA):
+def _reka_output_contract(output_schema=OUTPUT_SCHEMA, reasoning=True):
+    schema = json.dumps(output_schema, ensure_ascii=False, separators=(",", ":"))
+    reasoning_instructions = (
+        """First think briefly inside <reasoning> and </reasoning> tags.
+Keep the reasoning concise and below 400 tokens so enough output budget remains for the final JSON.
+After </reasoning>, return only the final JSON object without markdown, notes, or commentary."""
+        if reasoning
+        else "Return only the final JSON object without reasoning, markdown, notes, or commentary."
+    )
     if output_schema is OUTPUT_SCHEMA:
-        return """You are a JSON-only image prompt refiner.
-Use the user's prompt-building instructions, but return only the final JSON object.
-Do not reveal reasoning, analysis, markdown, code fences, notes, or commentary.
-Do not output <reasoning>, </reasoning>, <think>, or </think> tags.
-The JSON object must contain exactly these string keys:
-base_prompt, foreground_prompt, background_prompt, negative, report"""
-    keys = ", ".join(_schema_keys(output_schema))
+        return f"""You are a JSON-only image prompt refiner.
+Use the user's prompt-building instructions carefully.
+{reasoning_instructions}
+The final JSON must satisfy this schema exactly:
+{schema}"""
     return f"""You are a JSON-only prompt-processing assistant.
-Use the user's task instructions, but return only the final JSON object.
-Do not reveal reasoning, analysis, markdown, code fences, notes, or commentary.
-Do not output <reasoning>, </reasoning>, <think>, or </think> tags.
-The JSON object must contain exactly these keys:
-{keys}"""
+Use the user's task instructions carefully.
+{reasoning_instructions}
+The final JSON must satisfy this schema exactly:
+{schema}"""
 
 
-def _build_reka_prompt(prompt, output_schema=OUTPUT_SCHEMA):
+def _build_reka_prompt(prompt, output_schema=OUTPUT_SCHEMA, reasoning=True):
     return (
         "human: "
-        + _reka_output_contract(output_schema)
+        + _reka_output_contract(output_schema, reasoning)
         + "\n\nTask instructions:\n"
         + str(prompt).strip()
         + "\n\nFinal answer: return exactly one valid JSON object and nothing else."
@@ -752,26 +782,39 @@ def _request_ollama(
     output_schema=OUTPUT_SCHEMA,
     system_instructions=SYSTEM_INSTRUCTIONS,
     num_predict=1400,
+    reasoning=True,
 ):
     model_name = str(model).strip() or DEFAULT_OLLAMA_MODEL
     is_reka = _is_reka_flash_model(model_name)
+    supports_thinking = bool(reasoning) and not is_reka and "thinking" in _ollama_model_capabilities(
+        ollama_url, model_name
+    )
+    uses_reasoning = (is_reka and bool(reasoning)) or supports_thinking
     options = {
         "seed": int(seed),
         "temperature": float(temperature),
         "top_p": float(top_p),
         "num_ctx": _normalize_context_length(context_length),
-        "num_predict": int(num_predict),
+        "num_predict": (
+            int(num_predict) * REKA_FLASH_REASONING_BUDGET_MULTIPLIER
+            if uses_reasoning
+            else int(num_predict)
+        ),
     }
     if is_reka:
         options["stop"] = ["<sep>", "<|endoftext|>"]
+        options["top_k"] = REKA_FLASH_TOP_K
 
     payload = {
         "model": model_name,
-        "prompt": _build_reka_prompt(prompt, output_schema) if is_reka else prompt,
+        "prompt": _build_reka_prompt(prompt, output_schema, reasoning) if is_reka else prompt,
         "stream": False,
-        "format": output_schema,
         "options": options,
     }
+    if supports_thinking:
+        payload["think"] = True
+    if not uses_reasoning:
+        payload["format"] = output_schema
     if not is_reka:
         payload["system"] = str(system_instructions)
 
@@ -848,7 +891,9 @@ def _validate_result(data):
     return values
 
 
-def _normalized_string_list(value, key):
+def _normalized_string_list(value, key, coerce_string=False):
+    if coerce_string and isinstance(value, str):
+        value = re.split(r"[,;|\n]+", value)
     if not isinstance(value, list):
         raise ValueError(f"{key} must be an array")
     result = []
@@ -876,7 +921,7 @@ def _validate_prompt_plan(data):
             raise ValueError(f"{key} must be a string")
         plan[key] = data[key].strip()
     for key in PLAN_LIST_KEYS:
-        plan[key] = _normalized_string_list(data[key], key)
+        plan[key] = _normalized_string_list(data[key], key, coerce_string=True)
     if not any(plan[key] for key in PLAN_KEYS):
         raise ValueError("planner JSON contains no usable content")
     return plan
@@ -971,7 +1016,7 @@ def _validate_review(data):
             raise ValueError(f"{key} must be a boolean")
         review[key] = data[key]
     for key in REVIEW_LIST_KEYS:
-        review[key] = _normalized_string_list(data[key], key)
+        review[key] = _normalized_string_list(data[key], key, coerce_string=True)
     if not isinstance(data["summary"], str):
         raise ValueError("summary must be a string")
     review["summary"] = data["summary"].strip()
@@ -4388,6 +4433,8 @@ Fixed spatial inputs:
 Rules:
 - The target profile is an output-format label, never an image subject or source concept.
 - Never place the target profile name in subject, subject_details, required_elements, or any other content field unless the user supplied it as content.
+- Write subject as a short phrase copied verbatim from the source. Do not paraphrase it, generalize it, or infer a gender, species, role, or character type.
+- Keep required_elements source-verbatim as well. Put interpretations and visual elaboration only in the other planning fields.
 - Classify useful source concepts without writing the final prompt.
 - Put every fixed style-anchor and non-empty spatial concept in required_elements or spatial_relations.
 - You may put weak or incoherent random vocabulary in discarded_terms.
@@ -4696,7 +4743,7 @@ class NukunOllamaPromptRefiner:
                         "min": 0.0,
                         "max": 2.0,
                         "step": 0.01,
-                        "tooltip": "Ollama generation temperature. Lower is more deterministic.",
+                        "tooltip": "Ollama generation temperature. Lower is more deterministic; Reka Flash 3 recommends 0.60.",
                     },
                 ),
                 "top_p": (
@@ -4706,7 +4753,7 @@ class NukunOllamaPromptRefiner:
                         "min": 0.01,
                         "max": 1.0,
                         "step": 0.01,
-                        "tooltip": "Ollama nucleus sampling value.",
+                        "tooltip": "Ollama nucleus sampling value. Reka Flash 3 recommends 0.95.",
                     },
                 ),
                 "style_cluster": (
@@ -4724,7 +4771,7 @@ class NukunOllamaPromptRefiner:
                         "default": 120,
                         "min": 1,
                         "max": 600,
-                        "tooltip": "Maximum time to wait for each Ollama request.",
+                        "tooltip": "Maximum time to wait for each Ollama request. Use 180 or more for a large reasoning model with plan_compile_review.",
                     },
                 ),
                 "context_length": (
@@ -5069,6 +5116,7 @@ class NukunOllamaPromptRefiner:
                 output_schema=PLAN_SCHEMA,
                 system_instructions=PLANNER_SYSTEM_INSTRUCTIONS,
                 num_predict=700,
+                reasoning=False,
             )
             plan = _validate_prompt_plan(_extract_json_object(planner_response))
             plan = _enforce_fixed_plan_inputs(plan, style_anchor, left, right, top, bottom)
@@ -5192,6 +5240,7 @@ class NukunOllamaPromptRefiner:
                     output_schema=REVIEW_SCHEMA,
                     system_instructions=REVIEWER_SYSTEM_INSTRUCTIONS,
                     num_predict=500,
+                    reasoning=False,
                 )
                 review = _normalize_review_consistency(
                     _validate_review(_extract_json_object(reviewer_response)),

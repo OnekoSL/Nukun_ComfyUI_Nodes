@@ -1,5 +1,10 @@
 # Changelog
 
+- Enabled actual reasoning for Ollama models advertised with the `thinking` capability and for Reka Flash's inline `<reasoning>` format by removing the conflicting JSON grammar only on those paths, stripping reasoning before validation, and reserving a larger output-token budget. Reka Flash also receives its recommended `top_k = 1024`.
+- Grounded Reka's unconstrained final answer with the complete JSON schema and recover harmless stringified planner/reviewer list fields locally instead of abandoning a long pipeline run.
+- Capped requested Reka reasoning at 400 tokens so slow Q4 builds retain enough generation budget to reach their final JSON.
+- Kept reasoning on Reka compiler/correction work but switched planner and reviewer classification stages to fast schema-constrained JSON so Q4 models cannot exhaust those stages in an unbounded reasoning trace.
+
 ## Unreleased
 
 - Prevented Anima and Krea2 compiler prompts from leaking static example subjects, replaced a failed planner with a source-grounded local plan in `continue` mode, exposed the planner error in `plan_json`, normalized contradictory reviewer flags, and locally rebuilt results whose planned subject is still missing after correction.
