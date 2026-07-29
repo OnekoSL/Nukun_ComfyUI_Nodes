@@ -249,6 +249,25 @@ class PipelineExecutionTests(unittest.TestCase):
                 result = node.refine(**refine_kwargs(profile=profile))
             self.assertEqual(len(result), 8)
 
+    def test_reka_compiler_uses_schema_first_settings_for_verified_profiles(self):
+        node = refiner.NukunOllamaPromptRefiner()
+        for profile in ("krea2", "z_image", "wan2_2_video", "pony_v7"):
+            negative = "" if profile == "z_image" else "bad anatomy"
+            profile_result = (*self.clean_result[:1], negative, *self.clean_result[2:])
+            kwargs = refine_kwargs(profile=profile)
+            kwargs["ollama_model"] = "autoren-reka-flash-3-21b-reasoning-q4:latest"
+            with self.subTest(profile=profile), mock.patch.object(
+                refiner,
+                "_request_ollama",
+                side_effect=[json.dumps(plan_data()), json.dumps(compiler_data())],
+            ) as request, mock.patch.object(
+                refiner, "_postprocess_result", return_value=profile_result
+            ):
+                node.refine(**kwargs)
+            compiler_call = request.call_args_list[1]
+            self.assertFalse(compiler_call.kwargs["reasoning"])
+            self.assertEqual(compiler_call.kwargs["num_predict"], 900)
+
     def test_planner_failure_obeys_all_fallback_modes(self):
         node = refiner.NukunOllamaPromptRefiner()
         with mock.patch.object(refiner, "_request_ollama", side_effect=RuntimeError("planner down")):

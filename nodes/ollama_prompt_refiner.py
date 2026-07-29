@@ -18,11 +18,17 @@ DEFAULT_OLLAMA_CONTEXT_LENGTH = 4096
 OLLAMA_CONTEXT_LENGTH_CHOICES = ("2048", "4096", "8192", "16384", "32768", "65536", "131072")
 REKA_FLASH_TOP_K = 1024
 REKA_FLASH_REASONING_BUDGET_MULTIPLIER = 2
+REKA_FLASH_SCHEMA_FIRST_PROFILES = frozenset(("krea2", "z_image", "wan2_2_video", "pony_v7"))
+REKA_FLASH_SCHEMA_FIRST_NUM_PREDICT = 900
 DEFAULT_STYLE_CLUSTER = 430
 FALLBACK_MODES = ("adaptive", "strict", "continue")
 DEFAULT_FALLBACK_MODE = "adaptive"
 PIPELINE_MODES = ("single", "plan_compile", "plan_compile_review")
 DEFAULT_PIPELINE_MODE = "single"
+PROMPT_MODES = ("strict", "creative")
+DEFAULT_PROMPT_MODE = "strict"
+CREATIVE_MIN_TEMPERATURE = 0.8
+CREATIVE_MIN_TOP_P = 0.95
 NATURAL_FALLBACK_PROFILES = frozenset(("anima", "krea2", "z_image", "wan2_2_video"))
 SPLIT_BASE_WORD_RANGE = (10, 20)
 SPLIT_DETAIL_WORD_RANGE = (36, 40)
@@ -193,6 +199,17 @@ Return valid JSON only, with every requested key present."""
 REVIEWER_SYSTEM_INSTRUCTIONS = """You are a strict prompt quality reviewer.
 Compare the compiled prompt with the original source, structured plan, target-profile rules, and local findings.
 Report omissions, contradictions, unwanted additions, and profile violations without rewriting the prompt.
+Return valid JSON only, with every requested key present."""
+
+CREATIVE_PLANNER_SYSTEM_INSTRUCTIONS = """You are a creative image-prompt planner.
+Organize the supplied source into the requested JSON schema without writing the final prompt.
+Preserve the main subject and fixed requirements, then invent coherent supporting visual details where useful.
+The style anchor and every supplied spatial instruction are fixed requirements.
+Return valid JSON only, with every requested key present."""
+
+CREATIVE_REVIEWER_SYSTEM_INSTRUCTIONS = """You are a creative prompt quality reviewer.
+Compare the compiled prompt with the original source, structured plan, target-profile rules, and local findings.
+Accept coherent supporting additions; report only omissions, contradictions, off-topic additions, and profile violations.
 Return valid JSON only, with every requested key present."""
 
 EQUINE_PATTERN = re.compile(r"\b(pony|ponies|horse|horses|equine|stallion|mare|foal)\b", re.IGNORECASE)
@@ -724,6 +741,17 @@ def _is_reka_flash_model(model):
     return "reka-flash" in normalized or "reka_flash" in normalized
 
 
+def _generation_request_settings(model, target_profile):
+    schema_first = (
+        _is_reka_flash_model(model)
+        and _normalize_target_profile(target_profile) in REKA_FLASH_SCHEMA_FIRST_PROFILES
+    )
+    return {
+        "reasoning": not schema_first,
+        "num_predict": REKA_FLASH_SCHEMA_FIRST_NUM_PREDICT if schema_first else 1400,
+    }
+
+
 def _schema_keys(output_schema):
     return tuple(str(key) for key in output_schema.get("properties", {}).keys())
 
@@ -1071,6 +1099,49 @@ def _normalize_pipeline_mode(pipeline_mode):
     if mode in PIPELINE_MODES:
         return mode
     return DEFAULT_PIPELINE_MODE
+
+
+def _normalize_prompt_mode(prompt_mode):
+    mode = str(prompt_mode).strip().lower()
+    if mode in PROMPT_MODES:
+        return mode
+    return DEFAULT_PROMPT_MODE
+
+
+def _prompt_mode_instructions(prompt_mode):
+    if _normalize_prompt_mode(prompt_mode) == "creative":
+        return """Creative mode:
+- Preserve the main subject, style anchor, spatial inputs, and explicit must-have details.
+- Freely invent compatible poses, expressions, secondary props, environmental details, composition, lighting, color, texture, and atmosphere.
+- Prefer a bold coherent interpretation over a literal restatement, but never replace the main subject or contradict fixed requirements."""
+    return """Strict mode:
+- Stay closely grounded in the supplied source and fixed requirements.
+- Add only small supporting details needed to make the image coherent.
+- Do not introduce a new subject, setting, action, or visual motif."""
+
+
+def _prompt_mode_sampling(prompt_mode, temperature, top_p):
+    temperature = float(temperature)
+    top_p = float(top_p)
+    if _normalize_prompt_mode(prompt_mode) == "creative":
+        return max(CREATIVE_MIN_TEMPERATURE, temperature), max(CREATIVE_MIN_TOP_P, top_p)
+    return temperature, top_p
+
+
+def _prompt_system_instructions(prompt_mode):
+    return SYSTEM_INSTRUCTIONS + "\n\n" + _prompt_mode_instructions(prompt_mode)
+
+
+def _planner_system_instructions(prompt_mode):
+    if _normalize_prompt_mode(prompt_mode) == "creative":
+        return CREATIVE_PLANNER_SYSTEM_INSTRUCTIONS
+    return PLANNER_SYSTEM_INSTRUCTIONS
+
+
+def _reviewer_system_instructions(prompt_mode):
+    if _normalize_prompt_mode(prompt_mode) == "creative":
+        return CREATIVE_REVIEWER_SYSTEM_INSTRUCTIONS
+    return REVIEWER_SYSTEM_INSTRUCTIONS
 
 
 def _spatial_values(left="", right="", top="", bottom=""):
@@ -4311,6 +4382,7 @@ def _build_generation_prompt(
     top="",
     bottom="",
     prompt_plan=None,
+    prompt_mode=DEFAULT_PROMPT_MODE,
 ):
     target_profile = _normalize_target_profile(target_profile)
     anchor = str(style_anchor).strip()
@@ -4331,6 +4403,7 @@ def _build_generation_prompt(
     return f"""Rewrite this random word salad into one model-specific image prompt set.
 
 {_target_profile_instructions(target_profile, style_cluster)}
+{_prompt_mode_instructions(prompt_mode)}
 {example_block}{candidate_block}
 
 Random word salad (global guidance for the entire image):
@@ -4390,6 +4463,7 @@ def _build_minimal_retry_prompt(
     right="",
     top="",
     bottom="",
+    prompt_mode=DEFAULT_PROMPT_MODE,
 ):
     terms = ", ".join(_curated_terms(f"{style_anchor} {word_salad}", limit=18))
     if not terms:
@@ -4402,6 +4476,7 @@ def _build_minimal_retry_prompt(
     spatial_context = _spatial_context(target_profile, left, right, top, bottom)
     spatial_block = f"\n{spatial_context}" if spatial_context else ""
     return f"""Return one JSON object only. No markdown. No prose.
+{_prompt_mode_instructions(prompt_mode)}
 Use exactly these keys: {", ".join(RESPONSE_KEYS)}
 {_target_profile_instructions(target_profile, style_cluster)}
 {example_block}{candidate_block}{spatial_block}
@@ -4417,9 +4492,23 @@ def _build_planner_prompt(
     right="",
     top="",
     bottom="",
+    prompt_mode=DEFAULT_PROMPT_MODE,
 ):
     spatial = _spatial_values(left, right, top, bottom)
-    return f"""Create a conservative structured plan for target profile {_normalize_target_profile(target_profile)}.
+    mode = _normalize_prompt_mode(prompt_mode)
+    plan_style = "creative" if mode == "creative" else "conservative"
+    mode_rules = (
+        """- Keep the main subject grounded in the source, but you may paraphrase or visually interpret it.
+- Keep explicit must-have concepts and every fixed input in required_elements or spatial_relations.
+- Freely invent compatible actions, supporting props, setting details, composition, lighting, color, texture, and atmosphere.
+- Do not replace the main subject, contradict a fixed requirement, or introduce an unrelated dominant motif."""
+        if mode == "creative"
+        else """- Write subject as a short phrase copied verbatim from the source. Do not paraphrase it, generalize it, or infer a gender, species, role, or character type.
+- Keep required_elements source-verbatim as well. Put interpretations and visual elaboration only in the other planning fields.
+- Put every fixed style-anchor and non-empty spatial concept in required_elements or spatial_relations.
+- Do not invent a new subject, setting, action, style, prop, or required element."""
+    )
+    return f"""Create a {plan_style} structured plan for target profile {_normalize_target_profile(target_profile)}.
 
 Random word salad to curate:
 {str(word_salad).strip() or "(none)"}
@@ -4433,12 +4522,10 @@ Fixed spatial inputs:
 Rules:
 - The target profile is an output-format label, never an image subject or source concept.
 - Never place the target profile name in subject, subject_details, required_elements, or any other content field unless the user supplied it as content.
-- Write subject as a short phrase copied verbatim from the source. Do not paraphrase it, generalize it, or infer a gender, species, role, or character type.
-- Keep required_elements source-verbatim as well. Put interpretations and visual elaboration only in the other planning fields.
+- Prompt mode: {mode}.
+{mode_rules}
 - Classify useful source concepts without writing the final prompt.
-- Put every fixed style-anchor and non-empty spatial concept in required_elements or spatial_relations.
 - You may put weak or incoherent random vocabulary in discarded_terms.
-- Do not invent a new subject, setting, action, style, prop, or required element.
 - Use exactly these keys: {", ".join(PLAN_KEYS)}.
 - Return valid JSON only."""
 
@@ -4459,11 +4546,19 @@ def _build_review_prompt(
     right="",
     top="",
     bottom="",
+    prompt_mode=DEFAULT_PROMPT_MODE,
 ):
+    mode = _normalize_prompt_mode(prompt_mode)
+    addition_rule = (
+        "Coherent supporting details are allowed. Flag an addition only when it is off-topic, contradicts a fixed requirement, or replaces the main subject."
+        if mode == "creative"
+        else "Treat unsupported added details as unwanted additions."
+    )
     return f"""Review this compiled prompt without rewriting it.
 
 Target rules:
 {_target_profile_instructions(target_profile, style_cluster)}
+{_prompt_mode_instructions(prompt_mode)}
 
 Original source:
 {str(word_salad).strip() or "(none)"}
@@ -4483,6 +4578,8 @@ Compiled result:
 Local validation findings:
 {json.dumps(local_issues, ensure_ascii=False)}
 
+Prompt mode: {mode}.
+{addition_rule}
 Set needs_revision when a required concept is missing, the result contradicts the source, an unsupported detail was added, a target-profile rule is broken, or local findings are non-empty.
 Judge only the compiled result. Do not copy target-rule examples or required negative-prompt terms into profile_violations.
 When any finding list is non-empty, set needs_revision to true. When missing_elements is non-empty, set all_required_preserved to false.
@@ -4502,7 +4599,14 @@ def _build_correction_prompt(
     right="",
     top="",
     bottom="",
+    prompt_mode=DEFAULT_PROMPT_MODE,
 ):
+    mode = _normalize_prompt_mode(prompt_mode)
+    correction_rule = (
+        "Preserve valid creative elaborations and add compatible supporting detail where it helps the result."
+        if mode == "creative"
+        else "Do not introduce new motifs."
+    )
     return f"""Correct this compiled prompt exactly once.
 
 {_target_profile_instructions(target_profile, style_cluster)}
@@ -4528,7 +4632,8 @@ Local validation findings:
 Reviewer findings:
 {json.dumps(review, ensure_ascii=False, indent=2)}
 
-Fix only the reported problems. Preserve valid content and do not introduce new motifs.
+Prompt mode: {mode}.
+Fix only the reported problems. Preserve valid content. {correction_rule}
 Return exactly these JSON keys: {", ".join(RESPONSE_KEYS)}."""
 
 
@@ -4842,6 +4947,13 @@ class NukunOllamaPromptRefiner:
                         "tooltip": "Unload the Ollama model after the complete node run so ComfyUI can reclaim RAM and VRAM.",
                     },
                 ),
+                "prompt_mode": (
+                    PROMPT_MODES,
+                    {
+                        "default": DEFAULT_PROMPT_MODE,
+                        "tooltip": "strict stays close to the input; creative may invent coherent supporting details and uses broader sampling.",
+                    },
+                ),
             },
         }
 
@@ -4869,12 +4981,18 @@ class NukunOllamaPromptRefiner:
         top="",
         bottom="",
         fallback_mode=DEFAULT_FALLBACK_MODE,
+        prompt_mode=DEFAULT_PROMPT_MODE,
     ):
         _validate_refiner_inputs(target_profile, word_salad, style_anchor, left, right, top, bottom)
 
         profile = _normalize_target_profile(target_profile)
         mode = _normalize_fallback_mode(fallback_mode)
+        prompt_mode = _normalize_prompt_mode(prompt_mode)
+        sampling_temperature, sampling_top_p = _prompt_mode_sampling(
+            prompt_mode, temperature, top_p
+        )
         continue_active = profile in NATURAL_FALLBACK_PROFILES and mode == "continue"
+        generation_settings = _generation_request_settings(ollama_model, profile)
         responses = []
         errors = []
 
@@ -4914,12 +5032,15 @@ class NukunOllamaPromptRefiner:
                     right,
                     top,
                     bottom,
+                    prompt_mode=prompt_mode,
                 ),
                 seed,
-                temperature,
-                top_p,
+                sampling_temperature,
+                sampling_top_p,
                 timeout_seconds,
                 context_length,
+                system_instructions=_prompt_system_instructions(prompt_mode),
+                **generation_settings,
             )
             responses.append(("initial", raw_response))
         except RuntimeError as error:
@@ -4944,6 +5065,7 @@ class NukunOllamaPromptRefiner:
                 1.0,
                 timeout_seconds,
                 context_length,
+                **generation_settings,
             )
             responses.append(("repair", repair_response))
         except RuntimeError as error:
@@ -4971,12 +5093,14 @@ class NukunOllamaPromptRefiner:
                     right,
                     top,
                     bottom,
+                    prompt_mode,
                 ),
                 int(seed) + 2,
                 0.0,
                 1.0,
                 timeout_seconds,
                 context_length,
+                **generation_settings,
             )
             responses.append(("minimal", minimal_response))
         except RuntimeError as error:
@@ -5032,9 +5156,11 @@ class NukunOllamaPromptRefiner:
         bottom="",
         fallback_mode=DEFAULT_FALLBACK_MODE,
         pipeline_mode=DEFAULT_PIPELINE_MODE,
+        prompt_mode=DEFAULT_PROMPT_MODE,
     ):
         _validate_refiner_inputs(target_profile, word_salad, style_anchor, left, right, top, bottom)
         pipeline = _normalize_pipeline_mode(pipeline_mode)
+        prompt_mode = _normalize_prompt_mode(prompt_mode)
         if pipeline == "single":
             result = self._refine_single(
                 word_salad,
@@ -5053,11 +5179,16 @@ class NukunOllamaPromptRefiner:
                 top,
                 bottom,
                 fallback_mode,
+                prompt_mode,
             )
             return (*result, "{}", "{}")
 
         profile = _normalize_target_profile(target_profile)
         fallback = _normalize_fallback_mode(fallback_mode)
+        sampling_temperature, sampling_top_p = _prompt_mode_sampling(
+            prompt_mode, temperature, top_p
+        )
+        generation_settings = _generation_request_settings(ollama_model, profile)
         plan = {}
         planner_status = {}
         review = {}
@@ -5095,6 +5226,7 @@ class NukunOllamaPromptRefiner:
                 top,
                 bottom,
                 fallback,
+                prompt_mode,
             )
             single_result = _append_pipeline_report(
                 single_result,
@@ -5107,14 +5239,23 @@ class NukunOllamaPromptRefiner:
             planner_response = _request_ollama(
                 ollama_url,
                 ollama_model,
-                _build_planner_prompt(profile, word_salad, style_anchor, left, right, top, bottom),
+                _build_planner_prompt(
+                    profile,
+                    word_salad,
+                    style_anchor,
+                    left,
+                    right,
+                    top,
+                    bottom,
+                    prompt_mode,
+                ),
                 seed,
-                0.2,
-                top_p,
+                0.65 if prompt_mode == "creative" else 0.2,
+                sampling_top_p,
                 timeout_seconds,
                 context_length,
                 output_schema=PLAN_SCHEMA,
-                system_instructions=PLANNER_SYSTEM_INSTRUCTIONS,
+                system_instructions=_planner_system_instructions(prompt_mode),
                 num_predict=700,
                 reasoning=False,
             )
@@ -5159,12 +5300,15 @@ class NukunOllamaPromptRefiner:
                     top,
                     bottom,
                     prompt_plan=plan,
+                    prompt_mode=prompt_mode,
                 ),
                 int(seed) + 1,
-                temperature,
-                top_p,
+                sampling_temperature,
+                sampling_top_p,
                 timeout_seconds,
                 context_length,
+                system_instructions=_prompt_system_instructions(prompt_mode),
+                **generation_settings,
             )
             values = _validate_result(_extract_json_object(compiler_response))
             trace = {}
@@ -5231,6 +5375,7 @@ class NukunOllamaPromptRefiner:
                         right,
                         top,
                         bottom,
+                        prompt_mode,
                     ),
                     int(seed) + 2,
                     0.1,
@@ -5238,7 +5383,7 @@ class NukunOllamaPromptRefiner:
                     timeout_seconds,
                     context_length,
                     output_schema=REVIEW_SCHEMA,
-                    system_instructions=REVIEWER_SYSTEM_INSTRUCTIONS,
+                    system_instructions=_reviewer_system_instructions(prompt_mode),
                     num_predict=500,
                     reasoning=False,
                 )
@@ -5274,12 +5419,15 @@ class NukunOllamaPromptRefiner:
                         right,
                         top,
                         bottom,
+                        prompt_mode,
                     ),
                     int(seed) + 3,
-                    0.2,
-                    1.0,
+                    0.65 if prompt_mode == "creative" else 0.2,
+                    sampling_top_p if prompt_mode == "creative" else 1.0,
                     timeout_seconds,
                     context_length,
+                    system_instructions=_prompt_system_instructions(prompt_mode),
+                    **generation_settings,
                 )
                 corrected_values = _validate_result(_extract_json_object(correction_response))
                 trace = {}
@@ -5396,6 +5544,7 @@ class NukunOllamaPromptRefiner:
         fallback_mode=DEFAULT_FALLBACK_MODE,
         pipeline_mode=DEFAULT_PIPELINE_MODE,
         unload_after_run=True,
+        prompt_mode=DEFAULT_PROMPT_MODE,
     ):
         try:
             return self._refine(
@@ -5416,6 +5565,7 @@ class NukunOllamaPromptRefiner:
                 bottom,
                 fallback_mode,
                 pipeline_mode,
+                prompt_mode,
             )
         finally:
             _unload_after_run(
@@ -5446,6 +5596,7 @@ class NukunOllamaPromptRefiner:
         fallback_mode=DEFAULT_FALLBACK_MODE,
         pipeline_mode=DEFAULT_PIPELINE_MODE,
         unload_after_run=True,
+        prompt_mode=DEFAULT_PROMPT_MODE,
     ):
         pipeline = _normalize_pipeline_mode(pipeline_mode)
         digest = hashlib.sha256()
@@ -5470,6 +5621,7 @@ class NukunOllamaPromptRefiner:
             else "ignored",
             pipeline,
             bool(unload_after_run),
+            _normalize_prompt_mode(prompt_mode),
         ):
             digest.update(str(value).encode("utf-8"))
             digest.update(b"\0")
