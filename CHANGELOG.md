@@ -4,6 +4,8 @@
 - Grounded Reka's unconstrained final answer with the complete JSON schema and recover harmless stringified planner/reviewer list fields locally instead of abandoning a long pipeline run.
 - Capped requested Reka reasoning at 400 tokens so slow Q4 builds retain enough generation budget to reach their final JSON.
 - Kept reasoning on Reka compiler/correction work but switched planner and reviewer classification stages to fast schema-constrained JSON so Q4 models cannot exhaust those stages in an unbounded reasoning trace.
+- Switched Reka Flash generation for Krea2, Z-Image, Wan 2.2, and Pony v7 to schema-constrained 900-token output after local Q4 tests showed faster, more reliable profile-compliant prompts than compiler reasoning.
+- Added a `prompt_mode` switch: `strict` preserves the source-grounded behavior, while `creative` allows coherent supporting details and broadens sampling without relaxing fixed style or spatial requirements.
 
 ## Unreleased
 
