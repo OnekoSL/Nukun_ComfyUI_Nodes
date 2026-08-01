@@ -1,11 +1,8 @@
-import importlib
-import sys
-from pathlib import Path
-
 import comfy.sample
 import comfy.samplers
 import comfy.utils
 import latent_preview
+import nodes
 from comfy_extras.nodes_differential_diffusion import DifferentialDiffusion
 from comfy_extras.nodes_edit_model import ReferenceLatent
 from comfy_extras.nodes_upscale_model import ImageUpscaleWithModel
@@ -289,22 +286,12 @@ def _get_usdu_processing_globals(usdu_class):
 
 def _load_ultimate_sd_upscale_no_upscale():
     try:
-        module = importlib.import_module("ComfyUI_UltimateSDUpscale")
-    except Exception:
-        custom_nodes_dir = Path(__file__).resolve().parents[2]
-        usdu_dir = custom_nodes_dir / "ComfyUI_UltimateSDUpscale"
-        if not usdu_dir.exists():
-            raise ImportError("ComfyUI_UltimateSDUpscale custom node folder was not found.")
-
-        original_sys_path = sys.path.copy()
-        try:
-            sys.path.insert(0, str(custom_nodes_dir))
-            sys.path.insert(0, str(usdu_dir))
-            module = importlib.import_module("ComfyUI_UltimateSDUpscale")
-        finally:
-            sys.path = original_sys_path
-
-    return module.NODE_CLASS_MAPPINGS["UltimateSDUpscaleNoUpscale"]
+        return nodes.NODE_CLASS_MAPPINGS["UltimateSDUpscaleNoUpscale"]
+    except KeyError:
+        raise ImportError(
+            "UltimateSDUpscaleNoUpscale is not loaded. Install or enable "
+            "ComfyUI_UltimateSDUpscale, then restart ComfyUI."
+        ) from None
 
 
 NODE_CLASS_MAPPINGS = {
