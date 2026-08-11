@@ -7,6 +7,12 @@
 
 ## Unreleased
 
+- Fixed pre-quoted multi-speaker dialogue in the MiniMax H3 builder so individual spoken lines are no longer wrapped in invalid nested quotes; the Video Refiner now also restores exact multi-speaker quotes locally when Ollama alters or drops them. H3 compilation requests at least 100 words per section, accepts 60 or more, and has no upper length limit.
+- Added `Ollama Video Prompt Refiner (Nukun)` for MiniMax H3 and Wan 2.2 with six connectable source sections, protected quoted dialogue, structured H3 assembly, Wan single-shot assembly, optional semantic review/correction, and source-preserving fallbacks.
+- Added `faithful`, `balanced`, and `cinematic` creativity modes to the Video Refiner; balanced now requires a substantive production rewrite and untranslated German prose triggers JSON repair while quoted dialogue remains untouched.
+- Split German video-source translation into a dedicated protected stage and added automatic repair for missing, short, or untranslated MiniMax H3 compiler output.
+- Added `MiniMax H3 Prompt Builder (Nukun)` with six structured Scene/Character/Action/Camera/Visual Style/Audio sections, independent deterministic vocabulary cursors, fixed-text fields, and exact spoken-dialogue guidance for Action and Audio.
+- Added six curated MiniMax H3 vocabulary resources with 80 prompt-ready Scene, Character, Action, Camera, Visual Style, and Audio phrases each and selected them as the builder's section defaults.
 - Prevented Anima and Krea2 compiler prompts from leaking static example subjects, replaced a failed planner with a source-grounded local plan in `continue` mode, exposed the planner error in `plan_json`, normalized contradictory reviewer flags, and locally rebuilt results whose planned subject is still missing after correction.
 - Made both Ollama nodes default to a 4096-token context and automatically unload their selected model after the complete node run, with an optional `unload_after_run` switch for prompt-only workflows that prefer a warm model.
 - Added optional `plan_compile` and `plan_compile_review` Ollama Prompt Refiner pipelines with structured planning, local validation, semantic review, one bounded correction, appended plan/review JSON outputs, and stage-aware fallback behavior for every target profile.

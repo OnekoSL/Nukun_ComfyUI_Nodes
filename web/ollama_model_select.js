@@ -8,6 +8,11 @@ const TARGET_NODES = [
         fallbackModel: "autoren-darkidol-llama-3-1-8b:latest",
     },
     {
+        className: "NukunOllamaVideoPromptRefiner",
+        displayName: "Ollama Video Prompt Refiner (Nukun)",
+        fallbackModel: "autoren-darkidol-llama-3-1-8b:latest",
+    },
+    {
         className: "NukunOllamaVisionCaptioner",
         displayName: "Ollama Vision Captioner (Nukun)",
         fallbackModel: "user-v4/joycaption-beta",

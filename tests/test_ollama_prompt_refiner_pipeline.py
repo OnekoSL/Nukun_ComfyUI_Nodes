@@ -12,6 +12,10 @@ if str(COMFY_ROOT) not in sys.path:
 from custom_nodes.Nukun_ComfyUI_Nodes.nodes import ollama_prompt_refiner as refiner  # noqa: E402
 
 
+def passthrough_language_inputs(word_salad, left, right, top, bottom, *_args):
+    return refiner._language_source_values(word_salad, left, right, top, bottom), "english", False
+
+
 def plan_data(required=None, avoid=None):
     return {
         "subject": "a red dragon",
@@ -174,6 +178,15 @@ class PipelineSchemaTests(unittest.TestCase):
 
 
 class PipelineExecutionTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(
+            refiner,
+            "_prepare_language_inputs",
+            side_effect=passthrough_language_inputs,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     clean_result = (
         "a red dragon flies above a mountain valley",
         "bad anatomy",
@@ -188,7 +201,9 @@ class PipelineExecutionTests(unittest.TestCase):
         with mock.patch.object(node, "_refine_single", return_value=self.clean_result) as classic:
             result = node.refine(**refine_kwargs(pipeline_mode="single"))
         classic.assert_called_once()
-        self.assertEqual(result[:6], self.clean_result)
+        self.assertEqual(result[:2], self.clean_result[:2])
+        self.assertEqual(result[3:6], self.clean_result[3:6])
+        self.assertIn("original English source text was preserved", result[2])
         self.assertEqual(result[6:], ("{}", "{}"))
 
     def test_plan_compile_uses_planner_and_compiler_seed_contract(self):

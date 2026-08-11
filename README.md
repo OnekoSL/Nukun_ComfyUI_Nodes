@@ -35,7 +35,9 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunIncrementingIntString` - display name `Incrementing Int to String (Nukun)`, category `Nukun/Text`
 - `NukunRandomVocabStringList` - display name `Random Vocab String List (Nukun)`, category `Nukun/Text`
 - `NukunVocabMultiStringList` - display name `Multi Vocab String List (Nukun)`, category `Nukun/Text`
+- `NukunMiniMaxH3PromptBuilder` - display name `MiniMax H3 Prompt Builder (Nukun)`, category `Nukun/Text`
 - `NukunOllamaPromptRefiner` - display name `Ollama Prompt Refiner (Nukun)`, category `Nukun/Text`
+- `NukunOllamaVideoPromptRefiner` - display name `Ollama Video Prompt Refiner (Nukun)`, category `Nukun/Video`
 - `NukunWan22VideoSettings` - display name `Wan 2.2 Video Settings (Nukun)`, category `Nukun/Video/Wan 2.2`
 - `NukunWan22TI2VLatent` - display name `Wan 2.2 TI2V Latent (Nukun)`, category `Nukun/Video/Wan 2.2`
 - `NukunWan22RunManifest` - display name `Wan 2.2 Run Manifest (Nukun)`, category `Nukun/Video/Wan 2.2`
@@ -134,7 +136,27 @@ Connect the optional `chain` input to append generated words after an existing s
 
 `Multi Vocab String List (Nukun)` combines four selectable vocab files in one node. Each slot has its own `amount` and incrementable `word_index` cursor, so ComfyUI's control-after-generate menu can keep, increment, decrement, or randomize each slot independently. The node returns a combined string plus one output per slot.
 
-See [VOCAB_STRING_LIST_GUIDE.md](VOCAB_STRING_LIST_GUIDE.md) for a practical guide to using both vocab nodes.
+## MiniMax H3 Prompt Builder
+
+`MiniMax H3 Prompt Builder (Nukun)` creates one structured video prompt from up to six sections in fixed order: `[Scene]`, `[Character]`, `[Action]`, `[Camera]`, `[Visual Style]`, and `[Audio]`. Empty sections are omitted. Each section combines an optional fixed multiline description with phrases selected from one existing vocab file. Keep `amount = 0` for text only, or increment the section's `word_index` to walk its deterministic shuffle bag.
+
+`spoken_dialogue` is copied exactly into both Action and Audio. The Action block states that the character speaks the line; the Audio block adds `dialogue_language`, `dialogue_voice`, `dialogue_delivery`, and `No other dialogue.` The separate section outputs contain their finished bodies without headers, while `prompt` contains the complete blank-line-separated H3 structure.
+
+Each section defaults to its matching bundled `resources/minimax_h3_*.csv` file. These six resources contain 80 complete phrases each. Actions describe continuous movement, camera entries contain one compatible shot plan, and Audio entries provide coherent ambience/music packages without spoken text. All section amounts still default to `0`, so sampling starts only when explicitly enabled.
+
+See [VOCAB_STRING_LIST_GUIDE.md](VOCAB_STRING_LIST_GUIDE.md) for practical guides to all three vocabulary-based text nodes and a complete H3 example.
+
+## Ollama Video Prompt Refiner
+
+`Ollama Video Prompt Refiner (Nukun)` accepts six independent Scene, Character, Action, Camera, Visual Style, and Audio source strings in English, German, or mixed language. It uses the selected local Ollama model to harmonize them for either `minimax_h3` or `wan2_2_video`, then returns only the finished `prompt`, `negative`, and a processing `report`.
+
+MiniMax H3 output is assembled locally with fixed `[Scene]`, `[Character]`, `[Action]`, `[Camera]`, `[Visual Style]`, and `[Audio]` headers. Ollama is instructed to write at least 100 words per H3 section, while validation accepts sections from 60 words upward with no upper length limit. Shorter or missing sections are rejected and sent through the JSON-repair request. Wan 2.2 output is joined as one continuous visual shot in character/action/scene/camera/style order; Audio is intentionally excluded and recorded in the report.
+
+`creativity_mode = balanced` is the default and substantially rewrites the source into more useful production direction with compatible secondary motion, atmosphere, camera timing, lighting response, and sound texture. Use `faithful` for a restrained rewrite or `cinematic` for stronger grounded directing and sound-design choices. German source fields first pass through a separate translation request before creative compilation. Translation and compiler validation both reject remaining German production prose. Double-quoted dialogue remains untouched throughout both stages.
+
+`pipeline_mode = single` makes one compiler request and one JSON-repair request only when needed; German input adds a preceding translation request and at most one translation repair. `review` adds a semantic continuity/grounding review and at most one correction. `fallback_mode = strict` stops on invalid output, `adaptive` can locally format the supplied sections after repeated validation failure, and `continue` also survives Ollama connection or timeout failures. Local fallbacks preserve source content without inventing replacement prose.
+
+For a randomized H3 workflow, connect the six section outputs from `MiniMax H3 Prompt Builder (Nukun)` directly to the matching six Video Refiner inputs. The older `wan2_2_video` profile remains available in `Ollama Prompt Refiner (Nukun)` for saved-workflow compatibility, while new video workflows should use the dedicated Video Refiner.
 
 ## Ollama Prompt Refiner
 
