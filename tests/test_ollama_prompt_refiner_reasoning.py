@@ -27,7 +27,32 @@ class FakeResponse:
 
 
 class ReasoningModelRequestTests(unittest.TestCase):
-    def request_payload(self, model, response='{"answer":"ok"}', num_predict=500, reasoning=True, system_instructions=refiner.SYSTEM_INSTRUCTIONS):
+    def test_reka_uses_schema_first_generation_for_the_four_verified_profiles(self):
+        model = "autoren-reka-flash-3-21b-reasoning-q4:latest"
+        for profile in ("krea2", "z_image", "wan2_2_video", "pony_v7"):
+            with self.subTest(profile=profile):
+                self.assertEqual(
+                    refiner._generation_request_settings(model, profile),
+                    {"reasoning": False, "num_predict": 900},
+                )
+
+        self.assertEqual(
+            refiner._generation_request_settings(model, "anima"),
+            {"reasoning": True, "num_predict": 1400},
+        )
+        self.assertEqual(
+            refiner._generation_request_settings("qwen3:8b", "z_image"),
+            {"reasoning": True, "num_predict": 1400},
+        )
+
+    def request_payload(
+        self,
+        model,
+        response='{"answer":"ok"}',
+        num_predict=500,
+        reasoning=True,
+        system_instructions=refiner.SYSTEM_INSTRUCTIONS,
+    ):
         with mock.patch.object(
             refiner.urllib.request,
             "urlopen",
