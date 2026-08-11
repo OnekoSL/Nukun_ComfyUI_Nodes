@@ -12,6 +12,10 @@ if str(COMFY_ROOT) not in sys.path:
 from custom_nodes.Nukun_ComfyUI_Nodes.nodes import ollama_prompt_refiner as refiner
 
 
+def passthrough_language_inputs(word_salad, left, right, top, bottom, *_args):
+    return refiner._language_source_values(word_salad, left, right, top, bottom), "english", False
+
+
 SPATIAL_VALUES = {
     "left": "a red fox beside a mossy stone",
     "right": "a blue glass tower reflected in water",
@@ -21,6 +25,15 @@ SPATIAL_VALUES = {
 
 
 class SpatialPromptInputTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(
+            refiner,
+            "_prepare_language_inputs",
+            side_effect=passthrough_language_inputs,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def spatial_result(self, foreground="A central subject stands in clear light.", background="A detailed room surrounds the subject."):
         base = "A cinematic image uses balanced composition and natural color."
         positive = refiner._join_positive_parts("krea2", base, foreground, background)

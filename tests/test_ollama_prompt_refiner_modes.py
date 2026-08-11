@@ -83,9 +83,16 @@ class PromptModeTests(unittest.TestCase):
             "mountains fill the valley",
         )
         node = refiner.NukunOllamaPromptRefiner()
-        with mock.patch.object(refiner, "_request_ollama", return_value=response) as request, mock.patch.object(
-            refiner, "_postprocess_result", return_value=result
-        ):
+        language_inputs = refiner._language_source_values(
+            "red dragon mountain valley", "", "", "", ""
+        )
+        with mock.patch.object(
+            refiner,
+            "_prepare_language_inputs",
+            return_value=(language_inputs, "english", False),
+        ), mock.patch.object(
+            refiner, "_request_ollama", return_value=response
+        ) as request, mock.patch.object(refiner, "_postprocess_result", return_value=result):
             node.refine(**refine_kwargs("creative"))
 
         call = request.call_args

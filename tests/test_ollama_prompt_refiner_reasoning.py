@@ -45,7 +45,14 @@ class ReasoningModelRequestTests(unittest.TestCase):
             {"reasoning": True, "num_predict": 1400},
         )
 
-    def request_payload(self, model, response='{"answer":"ok"}', num_predict=500, reasoning=True):
+    def request_payload(
+        self,
+        model,
+        response='{"answer":"ok"}',
+        num_predict=500,
+        reasoning=True,
+        system_instructions=refiner.SYSTEM_INSTRUCTIONS,
+    ):
         with mock.patch.object(
             refiner.urllib.request,
             "urlopen",
@@ -66,6 +73,7 @@ class ReasoningModelRequestTests(unittest.TestCase):
                     "required": ["answer"],
                     "additionalProperties": False,
                 },
+                system_instructions=system_instructions,
                 num_predict=num_predict,
                 reasoning=reasoning,
             )
@@ -93,6 +101,7 @@ class ReasoningModelRequestTests(unittest.TestCase):
         result, payload = self.request_payload(
             "autoren-reka-flash-3-21b-reasoning-q4:latest",
             reasoning=False,
+            system_instructions="Translate German.",
         )
 
         self.assertEqual(result, '{"answer":"ok"}')
@@ -100,6 +109,10 @@ class ReasoningModelRequestTests(unittest.TestCase):
         self.assertIn("without reasoning", payload["prompt"])
         self.assertNotIn("First think briefly", payload["prompt"])
         self.assertEqual(payload["options"]["num_predict"], 500)
+        self.assertIn("Translate German.", payload["prompt"])
+        self.assertLess(
+            payload["prompt"].index("System instructions:"), payload["prompt"].index("Task instructions:")
+        )
 
     def test_regular_models_keep_structured_output_contract(self):
         _result, payload = self.request_payload("qwen3:8b")

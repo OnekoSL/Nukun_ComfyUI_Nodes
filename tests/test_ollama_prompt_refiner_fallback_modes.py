@@ -12,6 +12,10 @@ if str(COMFY_ROOT) not in sys.path:
 from custom_nodes.Nukun_ComfyUI_Nodes.nodes import ollama_prompt_refiner as refiner
 
 
+def passthrough_language_inputs(word_salad, left, right, top, bottom, *_args):
+    return refiner._language_source_values(word_salad, left, right, top, bottom), "english", False
+
+
 def response_json(profile="anima"):
     negative = "" if profile == "z_image" else "bad anatomy"
     return json.dumps(
@@ -50,6 +54,15 @@ def refine_kwargs(profile="anima", fallback_mode="adaptive", **overrides):
 
 
 class NaturalFallbackModeTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(
+            refiner,
+            "_prepare_language_inputs",
+            side_effect=passthrough_language_inputs,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_interface_exposes_exactly_three_modes_with_adaptive_default(self):
         optional = refiner.NukunOllamaPromptRefiner.INPUT_TYPES()["optional"]
         choices, options = optional["fallback_mode"]
