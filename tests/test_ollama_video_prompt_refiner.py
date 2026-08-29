@@ -328,6 +328,24 @@ class OllamaVideoPromptRefinerTests(unittest.TestCase):
             for token in ('"nein, bitte nicht!"', '"sei still!!"'):
                 self.assertIn(token, result[key])
 
+    def test_compiler_restores_single_dialogue_and_removes_invented_quoted_lines(self):
+        source = {key: _kwargs()[key] for key in video.VIDEO_SECTION_KEYS}
+        values = _values(
+            action=_long_section(
+                "She completes the requested motion and then says 'translated line' while another voice adds 'invented reply'."
+            ),
+            audio=_long_section(
+                "The ambience remains coherent while a voice says 'translated line' and another adds 'invented reply'."
+            ),
+        )
+
+        result = video._validate_video_result(values, source, "minimax_h3")
+
+        for key in ("action", "audio"):
+            self.assertIn('"Hallo, ist da jemand?"', result[key])
+            self.assertNotIn("'translated line'", result[key])
+            self.assertNotIn("'invented reply'", result[key])
+
     def test_changed_or_missing_dialogue_triggers_one_repair(self):
         invalid = _values(audio="A voice says something else.")
         with mock.patch.object(video, "_request_ollama", side_effect=[_response(invalid), _response()]) as request:
@@ -390,6 +408,21 @@ class OllamaVideoPromptRefinerTests(unittest.TestCase):
         self.assertIn('"Hallo, ist da jemand?"', prompt)
         self.assertIn("temporal jitter", negative)
         self.assertIn("compiler_validation_fallback", report)
+
+    def test_adaptive_keeps_creative_json_when_only_section_length_is_short(self):
+        initial = _values(scene="A cinematic river temple glows through evening rain.")
+        repaired = _values(scene="Layered candlelight ripples across a cinematic river temple in evening rain.")
+        with mock.patch.object(
+            video,
+            "_request_ollama",
+            side_effect=[_response(initial), _response(repaired)],
+        ) as request:
+            prompt, _negative, report = self.node.refine(**_kwargs(fallback_mode="adaptive"))
+
+        self.assertEqual(request.call_count, 2)
+        self.assertIn("Layered candlelight ripples", prompt)
+        self.assertNotIn("[Scene]\nA glowing forest at twilight.", prompt)
+        self.assertIn("compiler_relaxed_fallback", report)
 
     def test_strict_rejects_two_invalid_responses(self):
         with mock.patch.object(video, "_request_ollama", side_effect=["bad", "still bad"]):
@@ -494,8 +527,22 @@ class OllamaVideoPromptRefinerTests(unittest.TestCase):
     def test_minimax_prompt_requests_one_hundred_words_per_section(self):
         instructions = video._profile_instructions("minimax_h3")
 
-        self.assertIn("at least 100 words", instructions)
-        self.assertIn("no maximum section length", instructions)
+        self.assertIn("approximately 100 words", instructions)
+        self.assertIn("90 to 120 words", instructions)
+        self.assertIn("Never exceed 140 words", instructions)
+        self.assertIn("avoid padding, repetition, or runaway verbosity", instructions)
+
+    def test_compiler_disables_thinking_and_has_sufficient_json_budget(self):
+        with mock.patch.object(video, "_request_ollama", return_value=_response()) as request:
+            self.node.refine(**_kwargs())
+
+        compiler_call = request.call_args
+        self.assertFalse(compiler_call.kwargs["reasoning"])
+        self.assertEqual(
+            compiler_call.kwargs["num_predict"],
+            video.VIDEO_COMPILER_NUM_PREDICT,
+        )
+        self.assertGreaterEqual(video.VIDEO_COMPILER_NUM_PREDICT, 2400)
 
 
 if __name__ == "__main__":

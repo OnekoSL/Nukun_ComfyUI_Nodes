@@ -838,9 +838,11 @@ def _request_ollama(
 ):
     model_name = str(model).strip() or DEFAULT_OLLAMA_MODEL
     is_reka = _is_reka_flash_model(model_name)
-    supports_thinking = bool(reasoning) and not is_reka and "thinking" in _ollama_model_capabilities(
-        ollama_url, model_name
+    has_thinking_capability = (
+        not is_reka
+        and "thinking" in _ollama_model_capabilities(ollama_url, model_name)
     )
+    supports_thinking = bool(reasoning) and has_thinking_capability
     uses_reasoning = (is_reka and bool(reasoning)) or supports_thinking
     options = {
         "seed": int(seed),
@@ -867,8 +869,8 @@ def _request_ollama(
         "stream": False,
         "options": options,
     }
-    if supports_thinking:
-        payload["think"] = True
+    if has_thinking_capability:
+        payload["think"] = bool(reasoning)
     if not uses_reasoning:
         payload["format"] = output_schema
     if not is_reka:

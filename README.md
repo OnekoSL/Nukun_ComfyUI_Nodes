@@ -38,6 +38,9 @@ The main node set and core examples work with a standard ComfyUI installation. T
 - `NukunMiniMaxH3PromptBuilder` - display name `MiniMax H3 Prompt Builder (Nukun)`, category `Nukun/Text`
 - `NukunOllamaPromptRefiner` - display name `Ollama Prompt Refiner (Nukun)`, category `Nukun/Text`
 - `NukunOllamaVideoPromptRefiner` - display name `Ollama Video Prompt Refiner (Nukun)`, category `Nukun/Video`
+- `NukunAceSongVariationDirector` - display name `ACE Song Variation Director (Nukun)`, category `Nukun/Audio/ACE`
+- `NukunAceSongTimelineConditioning` - display name `ACE Song Timeline Conditioning (Nukun)`, category `Nukun/Audio/ACE`
+- `NukunAudioTimelineMixer5` - display name `Audio Timeline Mixer 5 (Nukun)`, category `Nukun/Audio`
 - `NukunWan22VideoSettings` - display name `Wan 2.2 Video Settings (Nukun)`, category `Nukun/Video/Wan 2.2`
 - `NukunWan22TI2VLatent` - display name `Wan 2.2 TI2V Latent (Nukun)`, category `Nukun/Video/Wan 2.2`
 - `NukunWan22RunManifest` - display name `Wan 2.2 Run Manifest (Nukun)`, category `Nukun/Video/Wan 2.2`
@@ -150,13 +153,21 @@ See [VOCAB_STRING_LIST_GUIDE.md](VOCAB_STRING_LIST_GUIDE.md) for practical guide
 
 `Ollama Video Prompt Refiner (Nukun)` accepts six independent Scene, Character, Action, Camera, Visual Style, and Audio source strings in English, German, or mixed language. It uses the selected local Ollama model to harmonize them for either `minimax_h3` or `wan2_2_video`, then returns only the finished `prompt`, `negative`, and a processing `report`.
 
-MiniMax H3 output is assembled locally with fixed `[Scene]`, `[Character]`, `[Action]`, `[Camera]`, `[Visual Style]`, and `[Audio]` headers. Ollama is instructed to write at least 100 words per H3 section, while validation accepts sections from 60 words upward with no upper length limit. Shorter or missing sections are rejected and sent through the JSON-repair request. Wan 2.2 output is joined as one continuous visual shot in character/action/scene/camera/style order; Audio is intentionally excluded and recorded in the report.
+MiniMax H3 output is assembled locally with fixed `[Scene]`, `[Character]`, `[Action]`, `[Camera]`, `[Visual Style]`, and `[Audio]` headers. Ollama is instructed to target approximately 100 focused words per H3 section (normally 90–120 and never more than 140 in the writing instruction), while validation accepts sections from 60 words upward without enforcing a maximum. The structured compiler disables model thinking so Ollama can enforce the JSON schema and uses a larger completion budget to avoid truncated objects. Exact source dialogue is restored locally and model-invented quoted lines are removed. In `adaptive` mode, a creative, otherwise valid result that remains below 60 words is retained instead of being replaced by the translated source; `strict` still rejects it. Wan 2.2 output is joined as one continuous visual shot in character/action/scene/camera/style order; Audio is intentionally excluded and recorded in the report.
 
 `creativity_mode = balanced` is the default and substantially rewrites the source into more useful production direction with compatible secondary motion, atmosphere, camera timing, lighting response, and sound texture. Use `faithful` for a restrained rewrite or `cinematic` for stronger grounded directing and sound-design choices. German source fields first pass through a separate translation request before creative compilation. Translation and compiler validation both reject remaining German production prose. Double-quoted dialogue remains untouched throughout both stages.
 
 `pipeline_mode = single` makes one compiler request and one JSON-repair request only when needed; German input adds a preceding translation request and at most one translation repair. `review` adds a semantic continuity/grounding review and at most one correction. `fallback_mode = strict` stops on invalid output, `adaptive` can locally format the supplied sections after repeated validation failure, and `continue` also survives Ollama connection or timeout failures. Local fallbacks preserve source content without inventing replacement prose.
 
 For a randomized H3 workflow, connect the six section outputs from `MiniMax H3 Prompt Builder (Nukun)` directly to the matching six Video Refiner inputs. The older `wan2_2_video` profile remains available in `Ollama Prompt Refiner (Nukun)` for saved-workflow compatibility, while new video workflows should use the dedicated Video Refiner.
+
+## ACE-Step song tools
+
+`ACE Song Variation Director (Nukun)` uses a local Ollama model to turn existing ACE-Step tags and sectioned lyrics into a coherent variation plan. Separate controls govern overall, energy, rhythm, instrument, vocal, harmonic, and transition variation. Exact `must_keep` phrases are validated, and passthrough mode preserves the original tags and lyrics if generation or repair fails.
+
+`ACE Song Timeline Conditioning (Nukun)` converts lyrics or the director's `plan_json` into time-regional ACE-Step 1.5 conditioning. It allocates the available audio codes across song sections, supports explicit per-section duration overrides and transition windows, and returns both the combined conditioning and a reproducible timeline report.
+
+`Audio Timeline Mixer 5 (Nukun)` places and mixes up to five ComfyUI audio inputs with independent offsets, gains, mutes, and fades. It can resample inputs, normalize mono/stereo channel layout, apply master gain, and reduce peaks or hard-clip to a selected ceiling.
 
 ## Ollama Prompt Refiner
 

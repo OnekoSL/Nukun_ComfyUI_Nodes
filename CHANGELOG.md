@@ -9,7 +9,11 @@
 
 ## Unreleased
 
-- Fixed pre-quoted multi-speaker dialogue in the MiniMax H3 builder so individual spoken lines are no longer wrapped in invalid nested quotes; the Video Refiner now also restores exact multi-speaker quotes locally when Ollama alters or drops them. H3 compilation requests at least 100 words per section, accepts 60 or more, and has no upper length limit.
+- Added `ACE Song Variation Director (Nukun)` for Ollama-guided ACE-Step arrangement and lyric variations with independent musical controls, exact must-keep phrases, bounded JSON repair, and source-preserving fallback.
+- Added `ACE Song Timeline Conditioning (Nukun)` for section-aware time-regional ACE-Step 1.5 conditioning with automatic or explicit durations, transition masks, timeline JSON, and allocation diagnostics.
+- Added `Audio Timeline Mixer 5 (Nukun)` for offsetting and mixing up to five audio tracks with per-track gain and fades, resampling, channel normalization, master gain, and configurable peak protection.
+- Fixed linked `control after generate` selectors in `Multi Vocab String List (Nukun)` and `MiniMax H3 Prompt Builder (Nukun)`. Multi Vocab now declares four distinct server-side control prefixes so the fix is independent of frontend extensions and browser caches; the H3 builder uses browser-side identities without changing its serialized text-field layout.
+- Fixed pre-quoted multi-speaker dialogue in the MiniMax H3 builder so individual spoken lines are no longer wrapped in invalid nested quotes; the Video Refiner now also restores exact multi-speaker quotes locally when Ollama alters or drops them. H3 compilation targets approximately 100 focused words per section, accepts 60 or more without an upper limit, disables thinking for schema reliability, raises the completion budget, and keeps creative underlength JSON in `adaptive` mode instead of reverting to translated source text.
 - Added `Ollama Video Prompt Refiner (Nukun)` for MiniMax H3 and Wan 2.2 with six connectable source sections, protected quoted dialogue, structured H3 assembly, Wan single-shot assembly, optional semantic review/correction, and source-preserving fallbacks.
 - Added `faithful`, `balanced`, and `cinematic` creativity modes to the Video Refiner; balanced now requires a substantive production rewrite and untranslated German prose triggers JSON repair while quoted dialogue remains untouched.
 - Split German video-source translation into a dedicated protected stage and added automatic repair for missing, short, or untranslated MiniMax H3 compiler output.

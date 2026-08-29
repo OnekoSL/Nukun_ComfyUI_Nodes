@@ -159,6 +159,42 @@ class ReasoningModelRequestTests(unittest.TestCase):
         self.assertNotIn("format", generate_payload)
         self.assertEqual(generate_payload["options"]["num_predict"], 1000)
 
+    def test_structured_stage_explicitly_disables_native_thinking(self):
+        schema = {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        }
+        responses = (
+            FakeResponse(capabilities=["completion", "thinking"]),
+            FakeResponse('{"answer":"ok"}'),
+        )
+        with mock.patch.object(
+            refiner.urllib.request,
+            "urlopen",
+            side_effect=responses,
+        ) as urlopen:
+            result = refiner._request_ollama(
+                "http://127.0.0.1:11434",
+                "qwen3:8b",
+                "Return JSON.",
+                7,
+                0.6,
+                0.95,
+                30,
+                8192,
+                output_schema=schema,
+                num_predict=500,
+                reasoning=False,
+            )
+
+        self.assertEqual(result, '{"answer":"ok"}')
+        generate_payload = json.loads(urlopen.call_args_list[1].args[0].data.decode("utf-8"))
+        self.assertFalse(generate_payload["think"])
+        self.assertEqual(generate_payload["format"], schema)
+        self.assertEqual(generate_payload["options"]["num_predict"], 500)
+
 
 if __name__ == "__main__":
     unittest.main()

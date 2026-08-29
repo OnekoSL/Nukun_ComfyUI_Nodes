@@ -235,6 +235,7 @@ class NukunVocabMultiStringList:
                     "min": 0,
                     "max": 0xffffffffffffffff,
                     "control_after_generate": True,
+                    "control_prefix": f"word_index_{slot}",
                     "tooltip": f"Block cursor for slot {slot}. Increment/decrement/randomize this to choose the next word block.",
                 },
             )
