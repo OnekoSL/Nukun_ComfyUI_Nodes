@@ -11,7 +11,7 @@ for import_path in (COMFY_ROOT, CUSTOM_NODE_ROOT):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
-from nodes import minimax_h3_prompt_builder as h3
+from custom_nodes.Nukun_ComfyUI_Nodes.nodes import minimax_h3_prompt_builder as h3
 
 
 def _base_kwargs():

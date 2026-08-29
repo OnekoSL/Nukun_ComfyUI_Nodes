@@ -1,13 +1,15 @@
 # Changelog
 
+## Unreleased
+
+## v0.8.0
+
 - Enabled actual reasoning for Ollama models advertised with the `thinking` capability and for Reka Flash's inline `<reasoning>` format by removing the conflicting JSON grammar only on those paths, stripping reasoning before validation, and reserving a larger output-token budget. Reka Flash also receives its recommended `top_k = 1024`.
 - Grounded Reka's unconstrained final answer with the complete JSON schema and recover harmless stringified planner/reviewer list fields locally instead of abandoning a long pipeline run.
 - Capped requested Reka reasoning at 400 tokens so slow Q4 builds retain enough generation budget to reach their final JSON.
 - Kept reasoning on Reka compiler/correction work but switched planner and reviewer classification stages to fast schema-constrained JSON so Q4 models cannot exhaust those stages in an unbounded reasoning trace.
 - Switched Reka Flash generation for Krea2, Z-Image, Wan 2.2, and Pony v7 to schema-constrained 900-token output after local Q4 tests showed faster, more reliable profile-compliant prompts than compiler reasoning.
 - Added a `prompt_mode` switch: `strict` preserves the source-grounded behavior, while `creative` allows coherent supporting details and broadens sampling without relaxing fixed style or spatial requirements.
-
-## Unreleased
 
 - Added `ACE Song Variation Director (Nukun)` for Ollama-guided ACE-Step arrangement and lyric variations with independent musical controls, exact must-keep phrases, bounded JSON repair, and source-preserving fallback.
 - Added `ACE Song Timeline Conditioning (Nukun)` for section-aware time-regional ACE-Step 1.5 conditioning with automatic or explicit durations, transition masks, timeline JSON, and allocation diagnostics.

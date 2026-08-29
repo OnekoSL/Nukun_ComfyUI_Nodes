@@ -16,8 +16,11 @@ for path in (str(COMFY_ROOT), str(CUSTOM_NODES_ROOT), str(NUKUN_ROOT)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from nodes import noise_sampler_core  # noqa: E402
-from nodes.universal_noise_sampler import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS  # noqa: E402
+from custom_nodes.Nukun_ComfyUI_Nodes.nodes import noise_sampler_core  # noqa: E402
+from custom_nodes.Nukun_ComfyUI_Nodes.nodes.universal_noise_sampler import (  # noqa: E402
+    NODE_CLASS_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS,
+)
 
 
 class _FakeModel:
@@ -65,10 +68,10 @@ class SamplerPreviewTests(unittest.TestCase):
             preview_method=preview_method,
         )
 
-    @mock.patch("nodes.noise_sampler_core.comfy.model_management.intermediate_device", return_value="cpu")
-    @mock.patch("nodes.noise_sampler_core.comfy.sample.fix_empty_latent_channels", side_effect=lambda model, samples, *args: samples)
-    @mock.patch("nodes.noise_sampler_core.latent_preview.prepare_callback", return_value=lambda *args: None)
-    @mock.patch("nodes.noise_sampler_core.latent_preview.set_preview_method")
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.comfy.model_management.intermediate_device", return_value="cpu")
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.comfy.sample.fix_empty_latent_channels", side_effect=lambda model, samples, *args: samples)
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.latent_preview.prepare_callback", return_value=lambda *args: None)
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.latent_preview.set_preview_method")
     def test_default_preview_method_does_not_override_global_setting(
         self,
         set_preview_method,
@@ -84,10 +87,10 @@ class SamplerPreviewTests(unittest.TestCase):
         set_preview_method.assert_not_called()
         prepare_callback.assert_called_once()
 
-    @mock.patch("nodes.noise_sampler_core.comfy.model_management.intermediate_device", return_value="cpu")
-    @mock.patch("nodes.noise_sampler_core.comfy.sample.fix_empty_latent_channels", side_effect=lambda model, samples, *args: samples)
-    @mock.patch("nodes.noise_sampler_core.latent_preview.prepare_callback", return_value=lambda *args: None)
-    @mock.patch("nodes.noise_sampler_core.latent_preview.set_preview_method")
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.comfy.model_management.intermediate_device", return_value="cpu")
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.comfy.sample.fix_empty_latent_channels", side_effect=lambda model, samples, *args: samples)
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.latent_preview.prepare_callback", return_value=lambda *args: None)
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.latent_preview.set_preview_method")
     def test_preview_overrides_restore_after_sampling(
         self,
         set_preview_method,
@@ -104,9 +107,9 @@ class SamplerPreviewTests(unittest.TestCase):
                     [mock.call(method), mock.call(None)],
                 )
 
-    @mock.patch("nodes.noise_sampler_core.comfy.sample.fix_empty_latent_channels", side_effect=lambda model, samples, *args: samples)
-    @mock.patch("nodes.noise_sampler_core.latent_preview.prepare_callback", return_value=lambda *args: None)
-    @mock.patch("nodes.noise_sampler_core.latent_preview.set_preview_method")
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.comfy.sample.fix_empty_latent_channels", side_effect=lambda model, samples, *args: samples)
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.latent_preview.prepare_callback", return_value=lambda *args: None)
+    @mock.patch("custom_nodes.Nukun_ComfyUI_Nodes.nodes.noise_sampler_core.latent_preview.set_preview_method")
     def test_preview_override_restores_when_sampling_raises(
         self,
         set_preview_method,

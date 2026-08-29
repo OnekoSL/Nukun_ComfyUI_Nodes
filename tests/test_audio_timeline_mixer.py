@@ -12,7 +12,7 @@ for import_path in (COMFY_ROOT, CUSTOM_NODE_ROOT):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
-from nodes import audio_timeline_mixer as mixer
+from custom_nodes.Nukun_ComfyUI_Nodes.nodes import audio_timeline_mixer as mixer
 
 
 def _audio(values, sample_rate=10, channels=1, batch=1):

@@ -10,7 +10,7 @@ for import_path in (COMFY_ROOT, CUSTOM_NODE_ROOT):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
-from nodes import ace_song_timeline_conditioning as timeline
+from custom_nodes.Nukun_ComfyUI_Nodes.nodes import ace_song_timeline_conditioning as timeline
 import torch
 from comfy import conds, samplers
 
