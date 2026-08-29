@@ -26,6 +26,7 @@ VIDEO_CREATIVITY_MODES = ("faithful", "balanced", "cinematic")
 DEFAULT_VIDEO_CREATIVITY_MODE = "balanced"
 H3_SECTION_TARGET_WORDS = 100
 H3_SECTION_MIN_WORDS = 60
+VIDEO_COMPILER_NUM_PREDICT = 2600
 VIDEO_SECTION_KEYS = ("scene", "character", "action", "camera", "visual_style", "audio")
 VIDEO_RESPONSE_KEYS = (*VIDEO_SECTION_KEYS, "negative", "report")
 H3_SECTION_LABELS = {
@@ -59,7 +60,23 @@ H3_NEGATIVE_BASELINE = (
 
 VIDEO_OUTPUT_SCHEMA = {
     "type": "object",
-    "properties": {key: {"type": "string"} for key in VIDEO_RESPONSE_KEYS},
+    "properties": {
+        **{
+            key: {
+                "type": "string",
+                "description": "Focused English video-production prose, ideally 90 to 120 words.",
+            }
+            for key in VIDEO_SECTION_KEYS
+        },
+        "negative": {
+            "type": "string",
+            "description": "A concise comma-separated list of at most 24 failure terms.",
+        },
+        "report": {
+            "type": "string",
+            "description": "One brief sentence describing the substantive refinement.",
+        },
+    },
     "required": list(VIDEO_RESPONSE_KEYS),
     "additionalProperties": False,
 }
@@ -105,6 +122,7 @@ Keep the supplied six fields semantically separate. Preserve the main subject, r
 Unless faithful mode is requested you must substantially rewrite and enrich the supplied notes instead of copying or merely concatenating them.
 You may infer compatible camera behavior, atmosphere, physical secondary motion, lighting interaction, sound design, or ambience when it clearly supports the source.
 Never invent a new main character, replace the central motif, add unrelated objects, add cuts, or turn one shot into a montage.
+Complete every required JSON field, close the JSON object, avoid repetition, and keep negative and report concise.
 Return no markdown or explanation outside JSON."""
 
 VIDEO_REVIEW_SYSTEM_INSTRUCTIONS = """You are a strict AI-video prompt reviewer.
@@ -121,6 +139,7 @@ Copy already-English prose unchanged.
 Return only one valid JSON object with exactly these six string keys: scene character action camera visual_style audio."""
 
 DOUBLE_QUOTED_PATTERN = re.compile(r'"[^"\r\n]*"')
+SINGLE_QUOTED_SPEECH_PATTERN = re.compile(r"(?<!\w)'[^'\r\n]{2,240}'(?!\w)")
 GERMAN_HINT_WORDS = frozenset(
     (
         "aber", "als", "auf", "aus", "bei", "das", "dass", "dem", "den", "der", "des", "die",
@@ -190,16 +209,16 @@ def _quoted_tokens(value):
     return DOUBLE_QUOTED_PATTERN.findall(str(value))
 
 
-def _restore_multi_speaker_quotes(value, required_quotes):
-    """Restore exact multi-speaker lines when a model alters or drops them."""
+def _restore_required_quotes(value, required_quotes):
+    """Restore exact source dialogue when a model alters, translates, or drops it."""
     required = []
     for token in required_quotes:
         if token not in required:
             required.append(token)
-    if len(required) < 2:
+    if not required:
         return str(value)
 
-    text = str(value)
+    text = SINGLE_QUOTED_SPEECH_PATTERN.sub("", str(value))
     present = _quoted_tokens(text)
     missing = [token for token in required if token not in present]
     if not missing:
@@ -274,7 +293,7 @@ def _validate_quotes(source, values, target_profile):
                 raise ValueError(f"spoken dialogue must remain in both action and audio: {token}")
 
 
-def _validate_video_result(data, source, target_profile):
+def _validate_video_result(data, source, target_profile, enforce_h3_minimum=True):
     if not isinstance(data, dict):
         raise ValueError("video JSON root is not an object")
     missing = [key for key in VIDEO_RESPONSE_KEYS if key not in data]
@@ -291,7 +310,7 @@ def _validate_video_result(data, source, target_profile):
         values[key] = _clean_prose(data[key])
 
     for key in VIDEO_SECTION_KEYS:
-        values[key] = _restore_multi_speaker_quotes(
+        values[key] = _restore_required_quotes(
             values[key],
             _quoted_tokens(source.get(key, "")),
         )
@@ -302,12 +321,12 @@ def _validate_video_result(data, source, target_profile):
                 if token not in dialogue_quotes:
                     dialogue_quotes.append(token)
         for key in ("action", "audio"):
-            values[key] = _restore_multi_speaker_quotes(values[key], dialogue_quotes)
+            values[key] = _restore_required_quotes(values[key], dialogue_quotes)
     if not any(values[key] for key in VIDEO_SECTION_KEYS):
         raise ValueError("video JSON contains no usable positive sections")
     _validate_quotes(source, values, target_profile)
     _validate_english_conversion(source, values)
-    if target_profile == "minimax_h3":
+    if target_profile == "minimax_h3" and enforce_h3_minimum:
         _validate_h3_section_lengths(values)
     return values
 
@@ -328,7 +347,7 @@ def _validate_language_result(data, source):
             raise ValueError(f"language field {key} must be a string")
         translated[key] = _clean_prose(data[key])
         source_quotes = _quoted_tokens(source.get(key, ""))
-        translated[key] = _restore_multi_speaker_quotes(translated[key], source_quotes)
+        translated[key] = _restore_required_quotes(translated[key], source_quotes)
         missing_quotes = [token for token in source_quotes if token not in translated[key]]
         if missing_quotes:
             raise ValueError(f"language field {key} changed quoted text: {', '.join(missing_quotes)}")
@@ -415,12 +434,13 @@ def _profile_instructions(target_profile):
     if target_profile == "minimax_h3":
         return f"""Target profile: MiniMax H3.
 - Return natural detailed production prose for Scene Character Action Camera Visual Style and Audio.
-- Write at least {H3_SECTION_TARGET_WORDS} words in every one of the six sections. There is no maximum section length. Never return a short section and never omit a section.
+- Write 90 to 120 words in every one of the six sections, targeting approximately {H3_SECTION_TARGET_WORDS} words. Never exceed 140 words in a section. Expand substantially, but stay focused and avoid padding, repetition, or runaway verbosity. Never omit a section.
 - Action must describe continuous temporal motion with a clear progression and physically plausible secondary movement.
 - Camera must specify one compatible framing/movement plan without cuts or contradictory moves.
 - Audio must describe ambience, sound effects, music, voice, delivery, and language when relevant.
 - Preserve spoken dialogue exactly in both Action and Audio and explicitly prevent additional dialogue when the source requests only one line.
-- Negative must be a compact comma-separated list of video and audio failures to avoid."""
+- Never invent, paraphrase, or translate spoken lines. Do not add any dialogue beyond the exact double-quoted source text.
+- Negative must contain no more than 24 compact comma-separated video and audio failure terms. Report must be one brief sentence."""
     return """Target profile: Wan 2.2 TI2V-5B.
 - Produce one achievable continuous visual shot without cuts, montage, teleportation, or simultaneous unrelated actions.
 - Character and Action define the subject, motion progression, direction, speed, expression, secondary motion, and settled end state.
@@ -713,7 +733,8 @@ class NukunOllamaVideoPromptRefiner:
                 context_length,
                 output_schema=VIDEO_OUTPUT_SCHEMA,
                 system_instructions=VIDEO_SYSTEM_INSTRUCTIONS,
-                num_predict=1800,
+                num_predict=VIDEO_COMPILER_NUM_PREDICT,
+                reasoning=False,
             )
         except RuntimeError as error:
             if fallback_mode == "continue":
@@ -723,6 +744,7 @@ class NukunOllamaVideoPromptRefiner:
         try:
             return _validate_video_result(_extract_json_object(response), source, target_profile), "compiler"
         except ValueError as initial_error:
+            repair = None
             try:
                 repair = self._request(
                     ollama_url,
@@ -735,7 +757,8 @@ class NukunOllamaVideoPromptRefiner:
                     context_length,
                     output_schema=VIDEO_OUTPUT_SCHEMA,
                     system_instructions=VIDEO_SYSTEM_INSTRUCTIONS,
-                    num_predict=1800,
+                    num_predict=VIDEO_COMPILER_NUM_PREDICT,
+                    reasoning=False,
                 )
                 values = _validate_video_result(_extract_json_object(repair), source, target_profile)
                 return values, "compiler_repair"
@@ -744,6 +767,23 @@ class NukunOllamaVideoPromptRefiner:
                     raise RuntimeError(
                         f"Ollama Video Prompt Refiner: compiler JSON invalid twice; initial={initial_error}; repair={repair_error}"
                     ) from repair_error
+                for candidate, candidate_name in ((repair, "repair"), (response, "compiler")):
+                    if not candidate:
+                        continue
+                    try:
+                        values = _validate_video_result(
+                            _extract_json_object(candidate),
+                            source,
+                            target_profile,
+                            enforce_h3_minimum=False,
+                        )
+                    except ValueError:
+                        continue
+                    values["report"] = _append_report(
+                        values.get("report", ""),
+                        f"Adaptive mode kept the creative {candidate_name} result despite sections below {H3_SECTION_MIN_WORDS} words.",
+                    )
+                    return values, "compiler_relaxed_fallback"
                 return _local_fallback(
                     source,
                     target_profile,
@@ -789,7 +829,8 @@ class NukunOllamaVideoPromptRefiner:
                 context_length,
                 output_schema=VIDEO_OUTPUT_SCHEMA,
                 system_instructions=VIDEO_SYSTEM_INSTRUCTIONS,
-                num_predict=1800,
+                num_predict=VIDEO_COMPILER_NUM_PREDICT,
+                reasoning=False,
             )
             corrected = _validate_video_result(_extract_json_object(correction), source, target_profile)
             corrected["report"] = _append_report(

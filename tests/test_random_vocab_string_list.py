@@ -113,8 +113,22 @@ class MultiVocabShuffleBagTests(unittest.TestCase):
         for slot in range(1, vocab.MULTI_SLOT_COUNT + 1):
             self.assertIn(f"word_index_{slot}", inputs)
             self.assertEqual(inputs[f"word_index_{slot}"][1]["control_after_generate"], True)
+            self.assertEqual(
+                inputs[f"word_index_{slot}"][1]["control_prefix"],
+                f"word_index_{slot}",
+            )
             for word_index in range(1, 4):
                 self.assertNotIn(f"word_{slot}_{word_index}", inputs)
+
+        self.assertEqual(
+            len(
+                {
+                    inputs[f"word_index_{slot}"][1]["control_prefix"]
+                    for slot in range(1, vocab.MULTI_SLOT_COUNT + 1)
+                }
+            ),
+            vocab.MULTI_SLOT_COUNT,
+        )
 
 
 class VisualArtStylesResourceTests(unittest.TestCase):

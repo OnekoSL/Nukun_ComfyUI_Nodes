@@ -13,6 +13,11 @@ const TARGET_NODES = [
         fallbackModel: "autoren-darkidol-llama-3-1-8b:latest",
     },
     {
+        className: "NukunAceSongVariationDirector",
+        displayName: "ACE Song Variation Director (Nukun)",
+        fallbackModel: "qwen3.6-12b-iq:Q6_K",
+    },
+    {
         className: "NukunOllamaVisionCaptioner",
         displayName: "Ollama Vision Captioner (Nukun)",
         fallbackModel: "user-v4/joycaption-beta",
