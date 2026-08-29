@@ -11,7 +11,7 @@ for import_path in (COMFY_ROOT, CUSTOM_NODE_ROOT):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
-from nodes import ollama_video_prompt_refiner as video
+from custom_nodes.Nukun_ComfyUI_Nodes.nodes import ollama_video_prompt_refiner as video
 
 
 def _long_section(opening, target=84):

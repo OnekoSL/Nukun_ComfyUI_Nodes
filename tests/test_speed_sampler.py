@@ -13,7 +13,7 @@ for path in (str(COMFY_ROOT), str(CUSTOM_NODES_ROOT), str(NUKUN_ROOT)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from nodes.speed_sampler import (  # noqa: E402
+from custom_nodes.Nukun_ComfyUI_Nodes.nodes.speed_sampler import (  # noqa: E402
     NODE_CLASS_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS,
     NukunSpeedSampler,
